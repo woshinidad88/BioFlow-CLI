@@ -17,12 +17,37 @@
 
 ## 快速开始
 
+### 安全安装（推荐）
+
+```bash
+# 下载安装脚本及其校验和
+curl -LO https://github.com/woshinidad88/BioFlow-CLI/releases/latest/download/install.sh
+curl -LO https://github.com/woshinidad88/BioFlow-CLI/releases/latest/download/install.sh.sha256
+
+# 运行前验证完整性（平台特定）
+# Linux：
+sha256sum -c install.sh.sha256
+
+# macOS：
+shasum -a 256 -c install.sh.sha256
+
+# Windows（PowerShell）：
+# (Get-FileHash install.sh -Algorithm SHA256).Hash -eq (Get-Content install.sh.sha256).Split()[0]
+
+# 如果验证失败，请勿继续 — 重新下载文件
+
+# 运行安装程序（Linux/macOS）
+bash install.sh
+```
+
+### 其他安装方式
+
 ```bash
 # 克隆仓库
 git clone https://github.com/woshinidad88/BioFlow-CLI.git
 cd BioFlow-CLI
 
-# 方式 A：使用安装脚本
+# 方式 A：使用安装脚本（不验证）
 chmod +x install.sh && ./install.sh
 
 # 方式 B：手动安装
@@ -56,7 +81,52 @@ BioFlow-CLI/
 
 ## 使用说明
 
-首次启动时，BioFlow-CLI 会提示您选择语言。选择结果会持久化保存，可随时通过设置菜单更改。
+BioFlow-CLI 支持 **交互式 TUI 模式** 和 **非交互式 CLI 模式**。
+
+### TUI 模式（交互式）
+
+不带参数启动以进入交互式菜单：
+
+```bash
+bioflow
+```
+
+首次启动时，会提示您选择语言。选择结果会持久化保存，可随时通过设置菜单更改。
+
+### CLI 模式（非交互式）
+
+使用命令行参数进行自动化和脚本编写：
+
+```bash
+# 格式化 FASTA 序列
+bioflow seq --input input.fasta --output output.fasta --width 80
+
+# 列出生物工具安装状态
+bioflow env --list
+
+# 安装指定工具
+bioflow env --install fastqc
+
+# 静默模式（抑制进度消息）
+bioflow --quiet seq --input input.fasta
+
+# JSON 输出（便于解析）
+bioflow --json seq --input input.fasta
+```
+
+#### 退出码
+
+| 代码 | 含义 |
+|---|---|
+| `0` | 成功 |
+| `1` | 运行时错误（如：无效的 FASTA 格式、安装失败） |
+| `2` | 参数错误（如：文件不存在、无效参数） |
+| `3` | 依赖缺失（如：Conda 未安装） |
+
+#### 输出流
+
+- **stdout**：结果和数据（用于管道传输）
+- **stderr**：进度消息、警告和错误
 
 ### 配置文件位置
 

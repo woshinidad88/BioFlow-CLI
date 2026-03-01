@@ -17,12 +17,37 @@ A professional bioinformatics TUI (Terminal User Interface) workflow tool with f
 
 ## Quick Start
 
+### Secure Installation (Recommended)
+
+```bash
+# Download the install script and its checksum
+curl -LO https://github.com/woshinidad88/BioFlow-CLI/releases/latest/download/install.sh
+curl -LO https://github.com/woshinidad88/BioFlow-CLI/releases/latest/download/install.sh.sha256
+
+# Verify integrity before running (platform-specific)
+# Linux:
+sha256sum -c install.sh.sha256
+
+# macOS:
+shasum -a 256 -c install.sh.sha256
+
+# Windows (PowerShell):
+# (Get-FileHash install.sh -Algorithm SHA256).Hash -eq (Get-Content install.sh.sha256).Split()[0]
+
+# If verification fails, DO NOT proceed — re-download the files
+
+# Run the installer (Linux/macOS)
+bash install.sh
+```
+
+### Alternative Installation Methods
+
 ```bash
 # Clone the repository
 git clone https://github.com/woshinidad88/BioFlow-CLI.git
 cd BioFlow-CLI
 
-# Option A: Use the install script
+# Option A: Use the install script (without verification)
 chmod +x install.sh && ./install.sh
 
 # Option B: Manual setup
@@ -56,7 +81,52 @@ BioFlow-CLI/
 
 ## Usage
 
-On first launch, BioFlow-CLI will prompt you to select a language. Your choice is persisted and can be changed anytime via the Settings menu.
+BioFlow-CLI supports both **interactive TUI mode** and **non-interactive CLI mode**.
+
+### TUI Mode (Interactive)
+
+Launch without arguments to enter the interactive menu:
+
+```bash
+bioflow
+```
+
+On first launch, you'll be prompted to select a language. Your choice is persisted and can be changed anytime via the Settings menu.
+
+### CLI Mode (Non-Interactive)
+
+Use command-line arguments for automation and scripting:
+
+```bash
+# Format FASTA sequences
+bioflow seq --input input.fasta --output output.fasta --width 80
+
+# List bio-tool installation status
+bioflow env --list
+
+# Install a specific tool
+bioflow env --install fastqc
+
+# Quiet mode (suppress progress messages)
+bioflow --quiet seq --input input.fasta
+
+# JSON output (for parsing)
+bioflow --json seq --input input.fasta
+```
+
+#### Exit Codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Runtime error (e.g., invalid FASTA format, installation failed) |
+| `2` | Argument error (e.g., file not found, invalid parameters) |
+| `3` | Dependency missing (e.g., Conda not installed) |
+
+#### Output Streams
+
+- **stdout**: Results and data (use for piping)
+- **stderr**: Progress messages, warnings, and errors
 
 ### Config Location
 

@@ -108,7 +108,14 @@ def main_menu() -> None:
 
 
 def main() -> None:
-    """程序入口。"""
+    """程序入口 — 根据参数决定 TUI 或 CLI 模式。"""
+    # 检测是否有命令行参数（除了脚本名）
+    if len(sys.argv) > 1:
+        # CLI 模式：导入并执行 CLI 入口
+        from bioflow.cli import main as cli_main
+        sys.exit(cli_main())
+
+    # TUI 模式：交互式界面
     _setup_logging()
     try:
         init_language()

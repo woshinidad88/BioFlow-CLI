@@ -49,7 +49,47 @@ if ! command -v python3 &>/dev/null; then
 fi
 
 PY_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+PY_MAJOR="$(python3 -c 'import sys; print(sys.version_info.major)')"
+PY_MINOR="$(python3 -c 'import sys; print(sys.version_info.minor)')"
+
 msg "Found Python $PY_VERSION" "检测到 Python $PY_VERSION"
+
+# Python 版本检查（需要 3.9+）
+if [[ "$PY_MAJOR" -lt 3 ]] || { [[ "$PY_MAJOR" -eq 3 ]] && [[ "$PY_MINOR" -lt 9 ]]; }; then
+    echo ""
+    msg "Error: Python 3.9+ is required (found $PY_VERSION)" \
+        "错误：需要 Python 3.9+（当前版本 $PY_VERSION）"
+    echo ""
+
+    # 平台特定的安装引导
+    case "$(uname -s)" in
+        Darwin)
+            msg "Install Python on macOS:" "在 macOS 上安装 Python："
+            msg "  • Homebrew: brew install python@3.11" \
+                "  • Homebrew：brew install python@3.11"
+            msg "  • Official: https://www.python.org/downloads/macos/" \
+                "  • 官方网站：https://www.python.org/downloads/macos/"
+            ;;
+        Linux)
+            msg "Install Python on Linux:" "在 Linux 上安装 Python："
+            msg "  • Ubuntu/Debian: sudo apt install python3.11" \
+                "  • Ubuntu/Debian：sudo apt install python3.11"
+            msg "  • Fedora/RHEL: sudo dnf install python3.11" \
+                "  • Fedora/RHEL：sudo dnf install python3.11"
+            msg "  • Arch: sudo pacman -S python" \
+                "  • Arch：sudo pacman -S python"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            msg "Install Python on Windows:" "在 Windows 上安装 Python："
+            msg "  • Official: https://www.python.org/downloads/windows/" \
+                "  • 官方网站：https://www.python.org/downloads/windows/"
+            msg "  • Winget: winget install Python.Python.3.11" \
+                "  • Winget：winget install Python.Python.3.11"
+            ;;
+    esac
+    echo ""
+    exit 1
+fi
 
 # 创建虚拟环境
 VENV_DIR=".venv"
@@ -75,8 +115,65 @@ pip install -r requirements.txt -q
 msg "Installing BioFlow-CLI..." "正在安装 BioFlow-CLI..."
 pip install -e . -q
 
+# 创建符号链接到 ~/.local/bin
+LOCAL_BIN="$HOME/.local/bin"
+mkdir -p "$LOCAL_BIN"
+
+BIOFLOW_EXEC="$(which bioflow 2>/dev/null || echo "$VENV_DIR/bin/bioflow")"
+LINK_PATH="$LOCAL_BIN/bioflow"
+
+if [[ -L "$LINK_PATH" ]] || [[ -f "$LINK_PATH" ]]; then
+    msg "Updating existing bioflow link in $LOCAL_BIN..." \
+        "正在更新 $LOCAL_BIN 中的 bioflow 链接..."
+    rm -f "$LINK_PATH"
+fi
+
+ln -s "$BIOFLOW_EXEC" "$LINK_PATH"
+msg "Created symlink: $LINK_PATH -> $BIOFLOW_EXEC" \
+    "已创建符号链接：$LINK_PATH -> $BIOFLOW_EXEC"
+
+# 检查 PATH 配置
+echo ""
+if echo "$PATH" | grep -q "$LOCAL_BIN"; then
+    msg "✓ $LOCAL_BIN is already in your PATH" \
+        "✓ $LOCAL_BIN 已在您的 PATH 中"
+else
+    msg "⚠ $LOCAL_BIN is NOT in your PATH" \
+        "⚠ $LOCAL_BIN 不在您的 PATH 中"
+    echo ""
+    msg "Add it to your shell profile:" "将其添加到您的 shell 配置文件："
+
+    # 检测 shell 类型
+    SHELL_NAME="$(basename "$SHELL")"
+    case "$SHELL_NAME" in
+        bash)
+            PROFILE_FILE="$HOME/.bashrc"
+            ;;
+        zsh)
+            PROFILE_FILE="$HOME/.zshrc"
+            ;;
+        fish)
+            PROFILE_FILE="$HOME/.config/fish/config.fish"
+            ;;
+        *)
+            PROFILE_FILE="$HOME/.profile"
+            ;;
+    esac
+
+    if [[ "$SHELL_NAME" == "fish" ]]; then
+        echo "  fish_add_path $LOCAL_BIN"
+        msg "  # Add to $PROFILE_FILE" "  # 添加到 $PROFILE_FILE"
+    else
+        echo "  export PATH=\"$LOCAL_BIN:\$PATH\""
+        msg "  # Add to $PROFILE_FILE" "  # 添加到 $PROFILE_FILE"
+    fi
+    echo ""
+fi
+
 echo ""
 msg "Installation complete!" "安装完成！"
-msg "Run with:  source $VENV_DIR/bin/activate && bioflow" \
-    "运行方式：source $VENV_DIR/bin/activate && bioflow"
+msg "Run with:  bioflow  (after adding to PATH)" \
+    "运行方式：bioflow（添加到 PATH 后）"
+msg "Or:        source $VENV_DIR/bin/activate && bioflow" \
+    "或者：    source $VENV_DIR/bin/activate && bioflow"
 echo ""
