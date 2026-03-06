@@ -12,7 +12,7 @@
 - **交互式 TUI** — 基于 `questionary` + `rich` 构建，提供优雅的终端交互体验
 - **国际化支持** — 完整的中英文本地化；首次运行时选择语言，偏好保存至用户配置目录
 - **环境管理器** — 一键检测和安装常用生物工具（FastQC、SAMtools、BWA、BLAST+、Trimmomatic），通过 Conda 管理
-- **序列格式化** — 标准化 FASTA 文件，支持自定义行宽
+- **序列格式化** — 标准化 FASTA/FASTQ 文件，支持自定义行宽
 - **模块化设计** — `env_manager`、`bio_tasks`、`i18n` 模块职责清晰分离
 
 ## 快速开始
@@ -98,8 +98,9 @@ bioflow
 使用命令行参数进行自动化和脚本编写：
 
 ```bash
-# 格式化 FASTA 序列
+# 格式化 FASTA/FASTQ 序列（自动识别）
 bioflow seq --input input.fasta --output output.fasta --width 80
+bioflow seq --input reads.fastq --output reads.formatted.fastq --width 80
 
 # 列出生物工具安装状态
 bioflow env --list
@@ -112,6 +113,9 @@ bioflow --quiet seq --input input.fasta
 
 # JSON 输出（便于解析）
 bioflow --json seq --input input.fasta
+
+# FASTQ 模式会输出质量摘要（平均 Q、Q20、Q30）
+bioflow seq --input reads.fastq
 ```
 
 #### 退出码
@@ -119,7 +123,7 @@ bioflow --json seq --input input.fasta
 | 代码 | 含义 |
 |---|---|
 | `0` | 成功 |
-| `1` | 运行时错误（如：无效的 FASTA 格式、安装失败） |
+| `1` | 运行时错误（如：无效的 FASTA/FASTQ 格式、安装失败） |
 | `2` | 参数错误（如：文件不存在、无效参数） |
 | `3` | 依赖缺失（如：Conda 未安装） |
 
@@ -140,14 +144,14 @@ bioflow --json seq --input input.fasta
 
 | 变量 | 说明 | 默认值 |
 |---|---|---|
-| `BIOFLOW_LARGE_FILE_MB` | FASTA 大文件警告阈值（MB） | `500` |
+| `BIOFLOW_LARGE_FILE_MB` | FASTA/FASTQ 大文件警告阈值（MB） | `500` |
 
 ### 主菜单
 
 | 操作 | 说明 |
 |---|---|
 | **[环境] 安装生物工具** | 检测并通过 Conda 安装生物信息学工具 |
-| **[序列] 格式化处理** | 标准化 FASTA 文件格式 |
+| **[序列] 格式化处理** | 标准化 FASTA/FASTQ 文件格式 |
 | **[设置] 切换语言** | 在中文和英文之间切换 |
 | **[退出] 退出程序** | 退出应用 |
 

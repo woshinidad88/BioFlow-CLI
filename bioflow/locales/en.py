@@ -24,14 +24,15 @@ STRINGS = {
 
     # === Sequence Tasks ===
     "seq_title": "Sequence Formatting",
-    "seq_input_prompt": "Enter the path to your FASTA file:",
+    "seq_input_prompt": "Enter the path to your FASTA/FASTQ file:",
     "seq_output_prompt": "Enter the output file path:",
     "seq_processing": "Processing sequences...",
     "seq_done": "Done! {count} sequences formatted and saved to {path}.",
     "seq_file_not_found": "File not found: {path}",
-    "seq_invalid_format": "Invalid FASTA format.",
+    "seq_invalid_format": "Invalid sequence format. Supported: FASTA/FASTQ.",
     "seq_back": "Back to main menu",
     "seq_wrap_prompt": "Line wrap width (default 80):",
+    "seq_fastq_stats": "FASTQ quality summary: Avg Q={avg_q}, Q20={q20}, Q30={q30}, Bases={bases}",
 
     # === General ===
     "confirm_exit": "Are you sure you want to exit?",

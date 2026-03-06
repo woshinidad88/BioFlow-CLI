@@ -15,7 +15,16 @@ from typing import Any
 from rich.console import Console
 
 from bioflow import __version__
-from bioflow.bio_tasks import LARGE_FILE_WARNING_MB, _format_fasta, _parse_fasta
+from bioflow.bio_tasks import (
+    LARGE_FILE_WARNING_MB,
+    SUPPORTED_FORMATS,
+    _detect_sequence_format,
+    _fastq_quality_stats,
+    _format_fasta,
+    _format_fastq,
+    _parse_fasta,
+    _parse_fastq,
+)
 from bioflow.env_manager import BIO_TOOLS, _check_conda, _check_installed
 from bioflow.i18n import init_language, t
 
@@ -49,9 +58,11 @@ def _setup_logging(quiet: bool = False) -> None:
 
 
 def cmd_seq(args: argparse.Namespace) -> int:
-    """处理 seq 子命令：FASTA 格式化。"""
+    """处理 seq 子命令：FASTA/FASTQ 格式化。"""
     input_path = Path(args.input)
-    output_path = Path(args.output) if args.output else input_path.with_suffix(".formatted.fasta")
+    default_suffix = input_path.suffix if input_path.suffix else ".fasta"
+    default_output = input_path.with_name(f"{input_path.stem}.formatted{default_suffix}")
+    output_path = Path(args.output) if args.output else default_output
     width = args.width
 
     # JSON 模式自动启用 quiet
@@ -86,28 +97,70 @@ def cmd_seq(args: argparse.Namespace) -> int:
             console_err.print(t("seq_processing"), style="cyan")
 
         text = input_path.read_text(encoding="utf-8")
-        records = _parse_fasta(text)
-
-        if not records:
+        seq_format = _detect_sequence_format(text)
+        if seq_format not in SUPPORTED_FORMATS:
             if args.json:
-                print(json.dumps({"error": "invalid_format", "path": str(input_path)}, ensure_ascii=False))
+                print(
+                    json.dumps(
+                        {"error": "invalid_format", "path": str(input_path)},
+                        ensure_ascii=False,
+                    )
+                )
             else:
                 console_err.print(t("seq_invalid_format"), style="bold red")
             return EXIT_RUNTIME_ERROR
 
-        # 格式化
-        output = _format_fasta(records, width)
+        fastq_stats: dict[str, float] | None = None
+        if seq_format == "fasta":
+            records = _parse_fasta(text)
+            if not records:
+                if args.json:
+                    print(
+                        json.dumps(
+                            {"error": "invalid_format", "path": str(input_path)},
+                            ensure_ascii=False,
+                        )
+                    )
+                else:
+                    console_err.print(t("seq_invalid_format"), style="bold red")
+                return EXIT_RUNTIME_ERROR
+            output = _format_fasta(records, width)
+        else:
+            records = _parse_fastq(text)
+            if not records:
+                if args.json:
+                    print(
+                        json.dumps(
+                            {"error": "invalid_format", "path": str(input_path)},
+                            ensure_ascii=False,
+                        )
+                    )
+                else:
+                    console_err.print(t("seq_invalid_format"), style="bold red")
+                return EXIT_RUNTIME_ERROR
+            output = _format_fastq(records, width)
+            fastq_stats = _fastq_quality_stats(records)
+
         output_path.write_text(output, encoding="utf-8")
 
         # 输出结果
         if args.json:
-            result = json.dumps({
+            payload: dict[str, Any] = {
                 "status": "success",
                 "input": str(input_path),
                 "output": str(output_path),
+                "format": seq_format,
                 "records": len(records),
-                "width": width
-            }, ensure_ascii=False)
+                "width": width,
+            }
+            if fastq_stats:
+                payload["quality"] = {
+                    "avg_q": round(fastq_stats["avg_q"], 4),
+                    "q20_ratio": round(fastq_stats["q20_ratio"], 6),
+                    "q30_ratio": round(fastq_stats["q30_ratio"], 6),
+                    "bases": int(fastq_stats["bases"]),
+                }
+            result = json.dumps(payload, ensure_ascii=False)
             # 直接使用 print 避免 rich 的自动换行
             print(result)
         else:
@@ -115,6 +168,16 @@ def cmd_seq(args: argparse.Namespace) -> int:
                 console_err.print(
                     t("seq_done", count=len(records), path=str(output_path)),
                     style="bold green"
+                )
+            if fastq_stats:
+                console_out.print(
+                    t(
+                        "seq_fastq_stats",
+                        avg_q=f"{fastq_stats['avg_q']:.2f}",
+                        q20=f"{fastq_stats['q20_ratio']:.1%}",
+                        q30=f"{fastq_stats['q30_ratio']:.1%}",
+                        bases=int(fastq_stats["bases"]),
+                    )
                 )
 
         return EXIT_SUCCESS
@@ -224,8 +287,8 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # seq 子命令
-    parser_seq = subparsers.add_parser("seq", help="Format FASTA sequences")
-    parser_seq.add_argument("--input", "-i", required=True, help="Input FASTA file")
+    parser_seq = subparsers.add_parser("seq", help="Format FASTA/FASTQ sequences")
+    parser_seq.add_argument("--input", "-i", required=True, help="Input FASTA/FASTQ file")
     parser_seq.add_argument("--output", "-o", help="Output file (default: input.formatted.fasta)")
     parser_seq.add_argument("--width", "-w", type=int, default=80, help="Line width (default: 80)")
 

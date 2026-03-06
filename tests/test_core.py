@@ -6,7 +6,16 @@ from unittest.mock import patch
 
 import pytest
 
-from bioflow.bio_tasks import _format_fasta, _parse_env_int, _parse_fasta, _wrap_sequence
+from bioflow.bio_tasks import (
+    _detect_sequence_format,
+    _fastq_quality_stats,
+    _format_fasta,
+    _format_fastq,
+    _parse_env_int,
+    _parse_fasta,
+    _parse_fastq,
+    _wrap_sequence,
+)
 from bioflow.i18n import _get_config_dir, load_config, set_language, t
 
 
@@ -45,6 +54,33 @@ class TestParseFasta:
         assert records[0] == (">only", "ACGT")
 
 
+class TestDetectSequenceFormat:
+    def test_detect_fasta(self):
+        assert _detect_sequence_format(">seq1\nATCG") == "fasta"
+
+    def test_detect_fastq(self):
+        assert _detect_sequence_format("@r1\nATCG\n+\nIIII") == "fastq"
+
+    def test_detect_invalid(self):
+        assert _detect_sequence_format("plain text") is None
+
+
+class TestParseFastq:
+    def test_normal_fastq(self):
+        text = "@r1\nATCG\n+\nIIII\n@r2\nGGAA\n+\n####\n"
+        records = _parse_fastq(text)
+        assert len(records) == 2
+        assert records[0] == ("@r1", "ATCG", "+", "IIII")
+
+    def test_missing_plus(self):
+        text = "@r1\nATCG\nno_plus\nIIII\n"
+        assert _parse_fastq(text) == []
+
+    def test_length_mismatch(self):
+        text = "@r1\nATCG\n+\nIII\n"
+        assert _parse_fastq(text) == []
+
+
 # === 序列换行 ===
 
 class TestWrapSequence:
@@ -71,6 +107,28 @@ class TestFormatFasta:
         assert lines[0] == ">s"
         assert lines[1] == "AABB"
         assert lines[2] == "CCDD"
+
+
+class TestFormatFastq:
+    def test_wrap_width(self):
+        output = _format_fastq([("@r1", "aabbcc", "+", "IIIIII")], width=3)
+        lines = output.strip().splitlines()
+        assert lines[0] == "@r1"
+        assert lines[1] == "AAB"
+        assert lines[2] == "BCC"
+        assert lines[3] == "+"
+        assert lines[4] == "III"
+        assert lines[5] == "III"
+
+
+class TestFastqQualityStats:
+    def test_quality_summary(self):
+        records = [("@r1", "ATCG", "+", "I5?!")]
+        stats = _fastq_quality_stats(records)
+        assert stats["bases"] == 4
+        assert pytest.approx(stats["avg_q"], rel=1e-6) == 22.5
+        assert pytest.approx(stats["q20_ratio"], rel=1e-6) == 0.75
+        assert pytest.approx(stats["q30_ratio"], rel=1e-6) == 0.5
 
 
 # === 环境变量安全解析 ===

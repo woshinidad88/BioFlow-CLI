@@ -3,159 +3,132 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-green.svg)](https://python.org)
 
-**[中文文档](README_CN.md)**
+**A bioinformatics workflow toolkit for terminal users (TUI + CLI), with English/Chinese i18n.**
 
-A professional bioinformatics TUI (Terminal User Interface) workflow tool with full i18n (English/Chinese) support.
+BioFlow-CLI provides practical sequence processing and environment management for common bioinformatics tasks, designed for both interactive use and automation scripts.
 
-## Features
+## Open Source Statement
 
-- **Interactive TUI** — Built with `questionary` + `rich` for a polished terminal experience
-- **i18n Support** — Full English and Chinese localization; language selected on first run and persisted to the user config directory
-- **Environment Manager** — One-click detection and installation of common bio-tools (FastQC, SAMtools, BWA, BLAST+, Trimmomatic) via Conda
-- **Sequence Formatting** — Standardize FASTA files with configurable line-wrap width
-- **Modular Design** — Clean separation of concerns across `env_manager`, `bio_tasks`, and `i18n` modules
+BioFlow-CLI is an **open-source project** released under the **MIT License**.
 
-## Quick Start
+- You may use, modify, and redistribute this project in commercial or non-commercial scenarios.
+- You must keep the original copyright and license notice.
+- Contributions are welcome via Issues and Pull Requests.
 
-### Secure Installation (Recommended)
+License text: [MIT License](LICENSE)
+
+## Key Features
+
+- **Dual Mode**: Interactive TUI (`bioflow`) and script-friendly CLI (`bioflow ...`)
+- **i18n**: Full English/Chinese localization with persisted language preference
+- **Environment Manager**: Detect/install FastQC, SAMtools, BWA, BLAST+, Trimmomatic via Conda
+- **Sequence Formatting**:
+  - FASTA formatting with configurable line width
+  - FASTQ formatting with auto-detection and quality summary (Avg Q / Q20 / Q30)
+- **Structured Output**: `--json` output for automation pipelines
+- **Stable Exit Codes**: standardized success/error/dependency signaling
+
+## Installation
+
+### Option A: Secure installer (recommended)
 
 ```bash
-# Download the install script and its checksum
-curl -LO https://github.com/woshinidad88/BioFlow-CLI/releases/latest/download/install.sh
-curl -LO https://github.com/woshinidad88/BioFlow-CLI/releases/latest/download/install.sh.sha256
+curl -LO https://github.com/BioCael-Dev/BioFlow-CLI/releases/latest/download/install.sh
+curl -LO https://github.com/BioCael-Dev/BioFlow-CLI/releases/latest/download/install.sh.sha256
 
-# Verify integrity before running (platform-specific)
-# Linux:
+# Linux
 sha256sum -c install.sh.sha256
 
-# macOS:
+# macOS
 shasum -a 256 -c install.sh.sha256
 
-# Windows (PowerShell):
-# (Get-FileHash install.sh -Algorithm SHA256).Hash -eq (Get-Content install.sh.sha256).Split()[0]
-
-# If verification fails, DO NOT proceed — re-download the files
-
-# Run the installer (Linux/macOS)
 bash install.sh
 ```
 
-### Alternative Installation Methods
+### Option B: Local development install
 
 ```bash
-# Clone the repository
-git clone https://github.com/woshinidad88/BioFlow-CLI.git
+git clone https://github.com/BioCael-Dev/BioFlow-CLI.git
 cd BioFlow-CLI
-
-# Option A: Use the install script (without verification)
-chmod +x install.sh && ./install.sh
-
-# Option B: Manual setup
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python -m bioflow.main
+pip install -e .
 ```
 
-## Project Structure
+## Quick Start
 
-```
-BioFlow-CLI/
-├── bioflow/
-│   ├── __init__.py        # Package metadata
-│   ├── main.py            # TUI entry point & main menu
-│   ├── i18n.py            # Internationalization core
-│   ├── env_manager.py     # Bio-tool detection & installation
-│   ├── bio_tasks.py       # Sequence formatting tasks
-│   └── locales/
-│       ├── __init__.py    # Locale registry
-│       ├── en.py          # English strings
-│       └── zh.py          # Chinese strings
-├── install.sh             # Bilingual install script
-├── pyproject.toml         # Build configuration
-├── requirements.txt       # Dependencies
-├── LICENSE                # MIT License
-├── README.md              # English documentation
-└── README_CN.md           # Chinese documentation
-```
-
-## Usage
-
-BioFlow-CLI supports both **interactive TUI mode** and **non-interactive CLI mode**.
-
-### TUI Mode (Interactive)
-
-Launch without arguments to enter the interactive menu:
+### TUI mode
 
 ```bash
 bioflow
 ```
 
-On first launch, you'll be prompted to select a language. Your choice is persisted and can be changed anytime via the Settings menu.
-
-### CLI Mode (Non-Interactive)
-
-Use command-line arguments for automation and scripting:
+### CLI mode
 
 ```bash
-# Format FASTA sequences
+# Format FASTA
 bioflow seq --input input.fasta --output output.fasta --width 80
 
-# List bio-tool installation status
+# Format FASTQ (auto-detected)
+bioflow seq --input reads.fastq --output reads.formatted.fastq --width 80
+
+# List tool status
 bioflow env --list
 
-# Install a specific tool
+# Install a tool
 bioflow env --install fastqc
 
-# Quiet mode (suppress progress messages)
-bioflow --quiet seq --input input.fasta
-
-# JSON output (for parsing)
-bioflow --json seq --input input.fasta
+# JSON output
+bioflow --json seq --input reads.fastq
 ```
 
-#### Exit Codes
+## CLI Behavior Contract
+
+### Exit Codes
 
 | Code | Meaning |
 |---|---|
 | `0` | Success |
-| `1` | Runtime error (e.g., invalid FASTA format, installation failed) |
-| `2` | Argument error (e.g., file not found, invalid parameters) |
-| `3` | Dependency missing (e.g., Conda not installed) |
+| `1` | Runtime error |
+| `2` | Argument error |
+| `3` | Dependency missing |
 
-#### Output Streams
+### Output Streams
 
-- **stdout**: Results and data (use for piping)
-- **stderr**: Progress messages, warnings, and errors
+- `stdout`: normal result data (including JSON)
+- `stderr`: progress, warnings, and errors
 
-### Config Location
+## Configuration
 
-| OS | Path |
-|---|---|
-| macOS | `~/Library/Application Support/bioflow/config.json` |
-| Linux | `~/.config/bioflow/config.json` (or `$XDG_CONFIG_HOME/bioflow/`) |
-| Windows | `%APPDATA%\bioflow\config.json` |
+Language config is saved per OS:
 
-### Environment Variables
+- macOS: `~/Library/Application Support/bioflow/config.json`
+- Linux: `~/.config/bioflow/config.json` (or `$XDG_CONFIG_HOME/bioflow/`)
+- Windows: `%APPDATA%\bioflow\config.json`
 
-| Variable | Description | Default |
-|---|---|---|
-| `BIOFLOW_LARGE_FILE_MB` | Large FASTA file warning threshold (MB) | `500` |
+Environment variable:
 
-### Main Menu
+- `BIOFLOW_LARGE_FILE_MB`: large file warning threshold (default `500`)
 
-| Action | Description |
-|---|---|
-| **[Environment] Install Bio-tools** | Detect and install bioinformatics tools via Conda |
-| **[Sequence] Formatting** | Standardize FASTA file formatting |
-| **[Settings] Change Language** | Switch between English and Chinese |
-| **[Exit] Quit** | Exit the application |
+## Development
 
-## Requirements
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+PYTHONPATH=. pytest -q
+```
 
-- Python 3.9+
-- [Conda](https://docs.conda.io/) (for bio-tool installation)
+## Contributing
+
+- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+
+## Project Status
+
+Current stable release: **v0.1.2**
+
+Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+This project is licensed under the [MIT License](LICENSE).

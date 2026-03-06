@@ -32,6 +32,14 @@ def temp_fasta(tmp_path):
 
 
 @pytest.fixture()
+def temp_fastq(tmp_path):
+    """创建临时 FASTQ 测试文件。"""
+    fastq_file = tmp_path / "test.fastq"
+    fastq_file.write_text("@r1\nATCG\n+\nI5?!\n@r2\nGGAA\n+\nIIII\n", encoding="utf-8")
+    return fastq_file
+
+
+@pytest.fixture()
 def mock_args():
     """创建模拟的 argparse.Namespace 对象。"""
     class Args:
@@ -144,6 +152,61 @@ class TestCmdSeq:
 
         exit_code = cmd_seq(args)
 
+        assert exit_code == EXIT_RUNTIME_ERROR
+
+    def test_fastq_json_output(self, temp_fastq, mock_args, capsys):
+        """测试 FASTQ 自动检测和 JSON 质量统计输出。"""
+        output_path = temp_fastq.parent / "output.fastq"
+        args = mock_args(
+            input=str(temp_fastq),
+            output=str(output_path),
+            width=80,
+            quiet=False,
+            json=True
+        )
+
+        exit_code = cmd_seq(args)
+        captured = capsys.readouterr()
+
+        assert exit_code == EXIT_SUCCESS
+        result = json.loads(captured.out)
+        assert result["status"] == "success"
+        assert result["format"] == "fastq"
+        assert result["records"] == 2
+        assert result["quality"]["bases"] == 8
+        assert "avg_q" in result["quality"]
+
+    def test_fastq_summary_to_stdout(self, temp_fastq, mock_args, capsys):
+        """测试 FASTQ 非 JSON 模式输出质量摘要到 stdout。"""
+        output_path = temp_fastq.parent / "output_summary.fastq"
+        args = mock_args(
+            input=str(temp_fastq),
+            output=str(output_path),
+            width=80,
+            quiet=True,
+            json=False
+        )
+
+        exit_code = cmd_seq(args)
+        captured = capsys.readouterr()
+
+        assert exit_code == EXIT_SUCCESS
+        assert "FASTQ quality summary" in captured.out
+
+    def test_invalid_fastq_format(self, tmp_path, mock_args):
+        """测试无效 FASTQ（序列与质量长度不一致）返回运行时错误。"""
+        invalid_file = tmp_path / "invalid.fastq"
+        invalid_file.write_text("@r1\nATCG\n+\nIII\n", encoding="utf-8")
+
+        args = mock_args(
+            input=str(invalid_file),
+            output=None,
+            width=80,
+            quiet=False,
+            json=False
+        )
+
+        exit_code = cmd_seq(args)
         assert exit_code == EXIT_RUNTIME_ERROR
 
 

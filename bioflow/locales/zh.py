@@ -24,14 +24,15 @@ STRINGS = {
 
     # === 序列任务 ===
     "seq_title": "序列格式化",
-    "seq_input_prompt": "请输入 FASTA 文件路径：",
+    "seq_input_prompt": "请输入 FASTA/FASTQ 文件路径：",
     "seq_output_prompt": "请输入输出文件路径：",
     "seq_processing": "正在处理序列...",
     "seq_done": "完成！已格式化 {count} 条序列，保存至 {path}。",
     "seq_file_not_found": "文件未找到：{path}",
-    "seq_invalid_format": "无效的 FASTA 格式。",
+    "seq_invalid_format": "无效的序列格式，仅支持 FASTA/FASTQ。",
     "seq_back": "返回主菜单",
     "seq_wrap_prompt": "每行字符宽度（默认 80）：",
+    "seq_fastq_stats": "FASTQ 质量摘要：平均 Q={avg_q}，Q20={q20}，Q30={q30}，碱基数={bases}",
 
     # === 通用 ===
     "confirm_exit": "确定要退出吗？",
