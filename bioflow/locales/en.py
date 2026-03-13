@@ -43,4 +43,24 @@ STRINGS = {
     "press_enter": "Press Enter to continue...",
     "env_conda_missing": "Conda is not installed. Please install Conda first (https://docs.conda.io/).",
     "seq_large_file_warn": "Warning: file is {size} MB, may use significant memory.",
+
+    # === QC Pipeline ===
+    "menu_qc": "[QC] Quality Control Pipeline",
+    "qc_title": "Quality Control Pipeline",
+    "qc_input_prompt": "Enter the path to your FASTQ file:",
+    "qc_output_prompt": "Enter the output directory:",
+    "qc_adapter_prompt": "Adapter file path (leave empty to skip):",
+    "qc_minlen_prompt": "Minimum read length (default 36):",
+    "qc_pipeline_start": "Starting QC pipeline for: {file}",
+    "qc_pipeline_done": "QC pipeline completed! Results saved to: {output}",
+    "qc_step_label": "[Step {step}] {name}",
+    "qc_step_failed": "Step failed ({step}): {err}",
+    "qc_running_fastqc": "Running FastQC on {file}...",
+    "qc_running_trimmomatic": "Running Trimmomatic on {file}...",
+
+    # === Preflight ===
+    "preflight_missing_cli": "Error: {tool} not found. Install with: {cmd}",
+    "preflight_missing_tui": "{tool} not found. Install with: {cmd}",
+    "preflight_unknown_tool": "Error: unknown tool '{tool}'",
+    "preflight_hint_env_manager": "Tip: use [Environment] menu to install missing tools, or install manually.",
 }

@@ -118,14 +118,9 @@ pip install -r requirements.txt -r requirements-dev.txt
 PYTHONPATH=. pytest -q
 ```
 
-## Contributing
-
-- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-
 ## Project Status
 
-Current stable release: **v0.1.2**
+Current stable release: **v0.2.0**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

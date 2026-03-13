@@ -27,6 +27,8 @@ from bioflow.bio_tasks import (
 )
 from bioflow.env_manager import BIO_TOOLS, _check_conda, _check_installed
 from bioflow.i18n import init_language, t
+from bioflow.pipeline import run_qc_pipeline
+from bioflow.preflight import PreflightError
 
 # 退出码标准
 EXIT_SUCCESS = 0
@@ -273,6 +275,60 @@ def cmd_env_install(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
 
 
+def cmd_qc(args: argparse.Namespace) -> int:
+    """处理 qc 子命令：质控流程。"""
+    input_path = Path(args.input)
+    quiet = args.quiet or args.json
+
+    if not input_path.exists():
+        if args.json:
+            print(json.dumps({"error": "file_not_found", "path": str(input_path)}, ensure_ascii=False))
+        else:
+            console_err.print(t("seq_file_not_found", path=str(input_path)), style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    output_dir = Path(args.output) if args.output else None
+    adapter = args.adapter if args.adapter else None
+    minlen = args.minlen
+
+    if minlen <= 0:
+        if args.json:
+            print(json.dumps({"error": "invalid_minlen", "minlen": minlen}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: minlen must be positive (got {minlen})", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    try:
+        success = run_qc_pipeline(
+            input_path,
+            output_dir=output_dir,
+            adapter=adapter,
+            minlen=minlen,
+            cli_mode=True,
+        )
+        if success:
+            if args.json:
+                payload = {
+                    "status": "success",
+                    "input": str(input_path),
+                    "output": str(output_dir or input_path.parent / "qc_output"),
+                }
+                print(json.dumps(payload, ensure_ascii=False))
+            return EXIT_SUCCESS
+        else:
+            return EXIT_RUNTIME_ERROR
+    except PreflightError as exc:
+        if args.json:
+            print(json.dumps({"error": "dependency_missing", "tools": exc.missing_tools}, ensure_ascii=False))
+        return EXIT_DEPENDENCY_MISSING
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"error": "runtime_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(t("error_unexpected", err=str(exc)), style="bold red")
+        return EXIT_RUNTIME_ERROR
+
+
 def main() -> int:
     """CLI 主入口。"""
     parser = argparse.ArgumentParser(
@@ -298,6 +354,13 @@ def main() -> int:
     env_group.add_argument("--list", "-l", action="store_true", help="List all tools and their status")
     env_group.add_argument("--install", "-i", metavar="TOOL", help="Install a specific tool")
 
+    # qc 子命令
+    parser_qc = subparsers.add_parser("qc", help="Run QC pipeline (FastQC + Trimmomatic)")
+    parser_qc.add_argument("--input", "-i", required=True, help="Input FASTQ file")
+    parser_qc.add_argument("--output", "-o", help="Output directory (default: qc_output/)")
+    parser_qc.add_argument("--adapter", "-a", help="Adapter file for Trimmomatic")
+    parser_qc.add_argument("--minlen", type=int, default=36, help="Minimum read length (default: 36)")
+
     args = parser.parse_args()
 
     # 初始化
@@ -312,6 +375,8 @@ def main() -> int:
             return cmd_env_list(args)
         elif args.install:
             return cmd_env_install(args)
+    elif args.command == "qc":
+        return cmd_qc(args)
     else:
         parser.print_help(sys.stderr)
         return EXIT_ARGUMENT_ERROR

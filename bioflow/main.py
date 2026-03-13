@@ -14,6 +14,7 @@ from rich.text import Text
 from bioflow import __version__
 from bioflow.bio_tasks import seq_menu
 from bioflow.env_manager import env_menu
+from bioflow.pipeline import qc_menu
 from bioflow.i18n import init_language, load_config, set_language, t
 
 console = Console()
@@ -80,6 +81,7 @@ def main_menu() -> None:
         choices = [
             t("menu_env"),
             t("menu_seq"),
+            t("menu_qc"),
             t("menu_settings"),
             t("menu_exit"),
         ]
@@ -103,6 +105,8 @@ def main_menu() -> None:
             env_menu()
         elif answer == t("menu_seq"):
             seq_menu()
+        elif answer == t("menu_qc"):
+            qc_menu()
         elif answer == t("menu_settings"):
             select_language()
 

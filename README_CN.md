@@ -21,8 +21,9 @@
 
 ```bash
 # 下载安装脚本及其校验和
-curl -LO https://github.com/woshinidad88/BioFlow-CLI/releases/latest/download/install.sh
-curl -LO https://github.com/woshinidad88/BioFlow-CLI/releases/latest/download/install.sh.sha256
+# 下载安装脚本及其校验和
+curl -LO https://github.com/BioCael-Dev/BioFlow-CLI/releases/latest/download/install.sh
+curl -LO https://github.com/BioCael-Dev/BioFlow-CLI/releases/latest/download/install.sh.sha256
 
 # 运行前验证完整性（平台特定）
 # Linux：
@@ -44,7 +45,7 @@ bash install.sh
 
 ```bash
 # 克隆仓库
-git clone https://github.com/woshinidad88/BioFlow-CLI.git
+git clone https://github.com/BioCael-Dev/BioFlow-CLI.git
 cd BioFlow-CLI
 
 # 方式 A：使用安装脚本（不验证）
@@ -152,6 +153,7 @@ bioflow seq --input reads.fastq
 |---|---|
 | **[环境] 安装生物工具** | 检测并通过 Conda 安装生物信息学工具 |
 | **[序列] 格式化处理** | 标准化 FASTA/FASTQ 文件格式 |
+| **[质控] QC Pipeline** | 串联 FastQC 和 Trimmomatic 执行质量控制 |
 | **[设置] 切换语言** | 在中文和英文之间切换 |
 | **[退出] 退出程序** | 退出应用 |
 

@@ -43,4 +43,24 @@ STRINGS = {
     "press_enter": "按 Enter 键继续...",
     "env_conda_missing": "未检测到 Conda，请先安装 Conda（https://docs.conda.io/）。",
     "seq_large_file_warn": "警告：文件大小为 {size} MB，可能占用大量内存。",
+
+    # === 质控流程 ===
+    "menu_qc": "[质控] QC Pipeline",
+    "qc_title": "质控流程",
+    "qc_input_prompt": "请输入 FASTQ 文件路径：",
+    "qc_output_prompt": "请输入输出目录：",
+    "qc_adapter_prompt": "Adapter 文件路径（留空跳过）：",
+    "qc_minlen_prompt": "最短读长（默认 36）：",
+    "qc_pipeline_start": "开始质控流程：{file}",
+    "qc_pipeline_done": "质控流程完成！结果保存至：{output}",
+    "qc_step_label": "[步骤 {step}] {name}",
+    "qc_step_failed": "步骤失败（{step}）：{err}",
+    "qc_running_fastqc": "正在运行 FastQC：{file}...",
+    "qc_running_trimmomatic": "正在运行 Trimmomatic：{file}...",
+
+    # === 工具预检 ===
+    "preflight_missing_cli": "错误：未找到 {tool}。安装命令：{cmd}",
+    "preflight_missing_tui": "未找到 {tool}。安装命令：{cmd}",
+    "preflight_unknown_tool": "错误：未知工具 '{tool}'",
+    "preflight_hint_env_manager": "提示：使用 [环境] 菜单安装缺失工具，或手动安装。",
 }
