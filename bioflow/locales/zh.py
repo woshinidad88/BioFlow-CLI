@@ -63,4 +63,18 @@ STRINGS = {
     "preflight_missing_tui": "未找到 {tool}。安装命令：{cmd}",
     "preflight_unknown_tool": "错误：未知工具 '{tool}'",
     "preflight_hint_env_manager": "提示：使用 [环境] 菜单安装缺失工具，或手动安装。",
+
+    # === 批量处理 ===
+    "batch_processing": "批量处理文件中...",
+    "batch_no_files": "未找到匹配的文件。",
+    "batch_success_title": "✓ 处理成功",
+    "batch_failed_title": "✗ 处理失败",
+    "batch_skipped_title": "⊙ 已跳过",
+    "batch_col_file": "文件名",
+    "batch_col_sequences": "序列数",
+    "batch_col_output": "输出文件",
+    "batch_col_time": "耗时",
+    "batch_col_error": "错误信息",
+    "batch_col_reason": "原因",
+    "batch_summary": "总计：{total} 个文件 | 成功：{success} | 失败：{failed} | 跳过：{skipped}",
 }

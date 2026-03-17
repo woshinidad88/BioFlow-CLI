@@ -24,6 +24,8 @@ from bioflow.bio_tasks import (
     _format_fastq,
     _parse_fasta,
     _parse_fastq,
+    batch_format_sequences,
+    display_batch_results,
 )
 from bioflow.env_manager import BIO_TOOLS, _check_conda, _check_installed
 from bioflow.i18n import init_language, t
@@ -181,6 +183,90 @@ def cmd_seq(args: argparse.Namespace) -> int:
                         bases=int(fastq_stats["bases"]),
                     )
                 )
+
+        return EXIT_SUCCESS
+
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"error": "runtime_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(t("error_unexpected", err=str(exc)), style="bold red")
+        return EXIT_RUNTIME_ERROR
+
+
+def cmd_batch(args: argparse.Namespace) -> int:
+    """处理 batch 子命令：批量格式化序列文件。"""
+    input_dir = Path(args.input_dir)
+    output_dir = Path(args.output_dir) if args.output_dir else Path("./formatted_output")
+    pattern = args.pattern
+    recursive = args.recursive
+    width = args.width
+    continue_on_error = args.continue_on_error
+    quiet = args.quiet or args.json
+
+    # 参数校验
+    if not input_dir.exists():
+        if args.json:
+            print(json.dumps({"error": "directory_not_found", "path": str(input_dir)}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: directory not found: {input_dir}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if not input_dir.is_dir():
+        if args.json:
+            print(json.dumps({"error": "not_a_directory", "path": str(input_dir)}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: not a directory: {input_dir}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if width <= 0:
+        if args.json:
+            print(json.dumps({"error": "invalid_width", "width": width}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: width must be positive (got {width})", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    try:
+        # 执行批量处理
+        results = batch_format_sequences(
+            input_dir=input_dir,
+            output_dir=output_dir,
+            pattern=pattern,
+            recursive=recursive,
+            width=width,
+            continue_on_error=continue_on_error,
+            quiet=quiet,
+        )
+
+        # 输出结果
+        if args.json:
+            payload = {
+                "status": "success",
+                "input_dir": str(input_dir),
+                "output_dir": str(output_dir),
+                "pattern": pattern,
+                "recursive": recursive,
+                "width": width,
+                "results": {
+                    "success": results["success"],
+                    "failed": results["failed"],
+                    "skipped": results["skipped"],
+                },
+                "summary": {
+                    "total": len(results["success"]) + len(results["failed"]) + len(results["skipped"]),
+                    "success_count": len(results["success"]),
+                    "failed_count": len(results["failed"]),
+                    "skipped_count": len(results["skipped"]),
+                },
+            }
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            if not quiet:
+                display_batch_results(results)
+
+        # 如果有失败且未设置 continue_on_error，返回错误码
+        if results["failed"] and not continue_on_error:
+            return EXIT_RUNTIME_ERROR
 
         return EXIT_SUCCESS
 
@@ -361,6 +447,15 @@ def main() -> int:
     parser_qc.add_argument("--adapter", "-a", help="Adapter file for Trimmomatic")
     parser_qc.add_argument("--minlen", type=int, default=36, help="Minimum read length (default: 36)")
 
+    # batch 子命令
+    parser_batch = subparsers.add_parser("batch", help="Batch format multiple sequence files")
+    parser_batch.add_argument("--input-dir", "-i", required=True, help="Input directory containing sequence files")
+    parser_batch.add_argument("--output-dir", "-o", help="Output directory (default: ./formatted_output)")
+    parser_batch.add_argument("--pattern", "-p", default="*.fasta", help="File pattern to match (default: *.fasta)")
+    parser_batch.add_argument("--recursive", "-r", action="store_true", help="Recursively scan subdirectories")
+    parser_batch.add_argument("--width", "-w", type=int, default=80, help="Line width (default: 80)")
+    parser_batch.add_argument("--continue-on-error", "-c", action="store_true", help="Continue processing on error")
+
     args = parser.parse_args()
 
     # 初始化
@@ -370,6 +465,8 @@ def main() -> int:
     # 路由到子命令
     if args.command == "seq":
         return cmd_seq(args)
+    elif args.command == "batch":
+        return cmd_batch(args)
     elif args.command == "env":
         if args.list:
             return cmd_env_list(args)

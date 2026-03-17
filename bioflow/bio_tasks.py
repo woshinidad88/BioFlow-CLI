@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 
 import questionary
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import track
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, track
+from rich.table import Table
 
 from bioflow.i18n import t
 
@@ -249,3 +251,252 @@ def seq_menu() -> None:
             style="bold cyan",
         )
     input(t("press_enter"))
+
+
+def batch_format_sequences(
+    input_dir: Path,
+    output_dir: Path,
+    pattern: str = "*.fasta",
+    recursive: bool = False,
+    width: int = 80,
+    continue_on_error: bool = True,
+    quiet: bool = False,
+) -> dict[str, list[dict]]:
+    """批量格式化序列文件。
+
+    Args:
+        input_dir: 输入目录
+        output_dir: 输出目录
+        pattern: 文件匹配模式（如 *.fasta, *.fa, *.fastq）
+        recursive: 是否递归扫描子目录
+        width: 序列换行宽度
+        continue_on_error: 遇到错误是否继续处理
+        quiet: 静默模式（不显示进度）
+
+    Returns:
+        包含 success/failed/skipped 列表的字典
+    """
+    # 收集文件
+    if recursive:
+        files = list(input_dir.rglob(pattern))
+    else:
+        files = list(input_dir.glob(pattern))
+
+    results = {
+        "success": [],
+        "failed": [],
+        "skipped": [],
+    }
+
+    if not files:
+        return results
+
+    # 确保输出目录存在
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 批量处理
+    if not quiet:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task(t("batch_processing"), total=len(files))
+
+            for file_path in files:
+                start_time = time.time()
+                try:
+                    # 读取文件
+                    text = file_path.read_text(encoding="utf-8")
+                    seq_format = _detect_sequence_format(text)
+
+                    if seq_format not in SUPPORTED_FORMATS:
+                        results["skipped"].append({
+                            "file": file_path.name,
+                            "reason": "unsupported_format",
+                            "time": 0.0,
+                        })
+                        continue
+
+                    # 解析和格式化
+                    if seq_format == "fasta":
+                        records = _parse_fasta(text)
+                        if not records:
+                            results["failed"].append({
+                                "file": file_path.name,
+                                "error": "parse_error",
+                                "time": time.time() - start_time,
+                            })
+                            if not continue_on_error:
+                                break
+                            continue
+                        output = _format_fasta(records, width)
+                        count = len(records)
+                    else:  # fastq
+                        records = _parse_fastq(text)
+                        if not records:
+                            results["failed"].append({
+                                "file": file_path.name,
+                                "error": "parse_error",
+                                "time": time.time() - start_time,
+                            })
+                            if not continue_on_error:
+                                break
+                            continue
+                        output = _format_fastq(records, width)
+                        count = len(records)
+
+                    # 写入输出文件
+                    output_path = output_dir / f"{file_path.stem}.formatted{file_path.suffix}"
+                    output_path.write_text(output, encoding="utf-8")
+
+                    results["success"].append({
+                        "file": file_path.name,
+                        "sequences": count,
+                        "output": output_path.name,
+                        "time": time.time() - start_time,
+                    })
+
+                except Exception as e:
+                    results["failed"].append({
+                        "file": file_path.name,
+                        "error": str(e),
+                        "time": time.time() - start_time,
+                    })
+                    if not continue_on_error:
+                        break
+                finally:
+                    progress.advance(task)
+    else:
+        # 静默模式：无进度条
+        for file_path in files:
+            start_time = time.time()
+            try:
+                text = file_path.read_text(encoding="utf-8")
+                seq_format = _detect_sequence_format(text)
+
+                if seq_format not in SUPPORTED_FORMATS:
+                    results["skipped"].append({
+                        "file": file_path.name,
+                        "reason": "unsupported_format",
+                        "time": 0.0,
+                    })
+                    continue
+
+                if seq_format == "fasta":
+                    records = _parse_fasta(text)
+                    if not records:
+                        results["failed"].append({
+                            "file": file_path.name,
+                            "error": "parse_error",
+                            "time": time.time() - start_time,
+                        })
+                        if not continue_on_error:
+                            break
+                        continue
+                    output = _format_fasta(records, width)
+                    count = len(records)
+                else:
+                    records = _parse_fastq(text)
+                    if not records:
+                        results["failed"].append({
+                            "file": file_path.name,
+                            "error": "parse_error",
+                            "time": time.time() - start_time,
+                        })
+                        if not continue_on_error:
+                            break
+                        continue
+                    output = _format_fastq(records, width)
+                    count = len(records)
+
+                output_path = output_dir / f"{file_path.stem}.formatted{file_path.suffix}"
+                output_path.write_text(output, encoding="utf-8")
+
+                results["success"].append({
+                    "file": file_path.name,
+                    "sequences": count,
+                    "output": output_path.name,
+                    "time": time.time() - start_time,
+                })
+
+            except Exception as e:
+                results["failed"].append({
+                    "file": file_path.name,
+                    "error": str(e),
+                    "time": time.time() - start_time,
+                })
+                if not continue_on_error:
+                    break
+
+    return results
+
+
+def display_batch_results(results: dict[str, list[dict]]) -> None:
+    """显示批量处理结果表格。"""
+    total = len(results["success"]) + len(results["failed"]) + len(results["skipped"])
+
+    if total == 0:
+        console.print(t("batch_no_files"), style="yellow")
+        return
+
+    # 成功表格
+    if results["success"]:
+        table = Table(title=t("batch_success_title"), show_header=True, header_style="bold green")
+        table.add_column(t("batch_col_file"), style="cyan")
+        table.add_column(t("batch_col_sequences"), justify="right", style="magenta")
+        table.add_column(t("batch_col_output"), style="blue")
+        table.add_column(t("batch_col_time"), justify="right", style="yellow")
+
+        for item in results["success"]:
+            table.add_row(
+                item["file"],
+                str(item["sequences"]),
+                item["output"],
+                f"{item['time']:.2f}s",
+            )
+
+        console.print(table)
+
+    # 失败表格
+    if results["failed"]:
+        table = Table(title=t("batch_failed_title"), show_header=True, header_style="bold red")
+        table.add_column(t("batch_col_file"), style="cyan")
+        table.add_column(t("batch_col_error"), style="red")
+        table.add_column(t("batch_col_time"), justify="right", style="yellow")
+
+        for item in results["failed"]:
+            table.add_row(
+                item["file"],
+                item["error"],
+                f"{item['time']:.2f}s",
+            )
+
+        console.print(table)
+
+    # 跳过表格
+    if results["skipped"]:
+        table = Table(title=t("batch_skipped_title"), show_header=True, header_style="bold yellow")
+        table.add_column(t("batch_col_file"), style="cyan")
+        table.add_column(t("batch_col_reason"), style="yellow")
+
+        for item in results["skipped"]:
+            table.add_row(item["file"], item["reason"])
+
+        console.print(table)
+
+    # 统计摘要
+    console.print(
+        t(
+            "batch_summary",
+            total=total,
+            success=len(results["success"]),
+            failed=len(results["failed"]),
+            skipped=len(results["skipped"]),
+        ),
+        style="bold cyan",
+    )
+

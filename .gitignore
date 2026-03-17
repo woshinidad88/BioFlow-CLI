@@ -26,3 +26,7 @@ build/
 
 # Test cache
 .pytest_cache/
+
+# Release Assets
+*.tar.gz
+*.sha256

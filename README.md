@@ -25,6 +25,8 @@ License text: [MIT License](LICENSE)
 - **Sequence Formatting**:
   - FASTA formatting with configurable line width
   - FASTQ formatting with auto-detection and quality summary (Avg Q / Q20 / Q30)
+  - Batch processing with progress tracking and result tables
+- **QC Pipeline**: Integrated FastQC + Trimmomatic workflow
 - **Structured Output**: `--json` output for automation pipelines
 - **Stable Exit Codes**: standardized success/error/dependency signaling
 
@@ -67,11 +69,20 @@ bioflow
 ### CLI mode
 
 ```bash
-# Format FASTA
+# Format single FASTA file
 bioflow seq --input input.fasta --output output.fasta --width 80
 
 # Format FASTQ (auto-detected)
 bioflow seq --input reads.fastq --output reads.formatted.fastq --width 80
+
+# Batch format multiple files
+bioflow batch --input-dir ./data --output-dir ./formatted --pattern "*.fasta" --width 80
+
+# Batch format with recursive scan
+bioflow batch -i ./data -o ./formatted -p "*.fastq" -r -w 60
+
+# Run QC pipeline
+bioflow qc --input reads.fastq --output qc_results/ --adapter adapters.fa --minlen 36
 
 # List tool status
 bioflow env --list
@@ -79,8 +90,9 @@ bioflow env --list
 # Install a tool
 bioflow env --install fastqc
 
-# JSON output
+# JSON output for automation
 bioflow --json seq --input reads.fastq
+bioflow --json batch -i ./data -o ./formatted
 ```
 
 ## CLI Behavior Contract
@@ -120,7 +132,7 @@ PYTHONPATH=. pytest -q
 
 ## Project Status
 
-Current stable release: **v0.2.0**
+Current stable release: **v0.2.1**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

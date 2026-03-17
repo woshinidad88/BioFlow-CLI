@@ -63,4 +63,18 @@ STRINGS = {
     "preflight_missing_tui": "{tool} not found. Install with: {cmd}",
     "preflight_unknown_tool": "Error: unknown tool '{tool}'",
     "preflight_hint_env_manager": "Tip: use [Environment] menu to install missing tools, or install manually.",
+
+    # === Batch Processing ===
+    "batch_processing": "Batch processing files...",
+    "batch_no_files": "No files found matching the pattern.",
+    "batch_success_title": "✓ Successfully Processed",
+    "batch_failed_title": "✗ Failed",
+    "batch_skipped_title": "⊙ Skipped",
+    "batch_col_file": "File",
+    "batch_col_sequences": "Sequences",
+    "batch_col_output": "Output",
+    "batch_col_time": "Time",
+    "batch_col_error": "Error",
+    "batch_col_reason": "Reason",
+    "batch_summary": "Total: {total} files | Success: {success} | Failed: {failed} | Skipped: {skipped}",
 }

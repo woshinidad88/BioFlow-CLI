@@ -7,20 +7,33 @@
 
 专业的生物信息学 TUI（终端用户界面）工作流工具，支持完整的中英文国际化。
 
+BioFlow-CLI 为常见的生物信息学任务提供实用的序列处理和环境管理功能，专为交互式使用和自动化脚本设计。
+
+## 开源声明
+
+BioFlow-CLI 是一个基于 **MIT 许可证** 发布的 **开源项目**。
+
+- 您可以在商业或非商业场景中使用、修改和分发此项目。
+- 您必须保留原始版权和许可证声明。
+- 欢迎通过 Issue 和 Pull Request 提交贡献。
+
+许可证全文：[MIT License](LICENSE)
+
 ## 功能特性
 
-- **交互式 TUI** — 基于 `questionary` + `rich` 构建，提供优雅的终端交互体验
+- **双模式运行** — 提供交互式 TUI (`bioflow`) 和脚本友好的 CLI (`bioflow ...`)
 - **国际化支持** — 完整的中英文本地化；首次运行时选择语言，偏好保存至用户配置目录
 - **环境管理器** — 一键检测和安装常用生物工具（FastQC、SAMtools、BWA、BLAST+、Trimmomatic），通过 Conda 管理
 - **序列格式化** — 标准化 FASTA/FASTQ 文件，支持自定义行宽
-- **模块化设计** — `env_manager`、`bio_tasks`、`i18n` 模块职责清晰分离
+- **批量处理** — 支持目录递归扫描、多文件并行逻辑处理、进度跟踪及统计表格
+- **QC 流程** — 集成 FastQC + Trimmomatic 的质量控制流水线
+- **模块化设计** — 职责清晰分离，易于扩展
 
 ## 快速开始
 
 ### 安全安装（推荐）
 
 ```bash
-# 下载安装脚本及其校验和
 # 下载安装脚本及其校验和
 curl -LO https://github.com/BioCael-Dev/BioFlow-CLI/releases/latest/download/install.sh
 curl -LO https://github.com/BioCael-Dev/BioFlow-CLI/releases/latest/download/install.sh.sha256
@@ -51,11 +64,11 @@ cd BioFlow-CLI
 # 方式 A：使用安装脚本（不验证）
 chmod +x install.sh && ./install.sh
 
-# 方式 B：手动安装
+# 方式 B：本地开发安装
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python -m bioflow.main
+pip install -e .
 ```
 
 ## 项目结构
@@ -63,11 +76,14 @@ python -m bioflow.main
 ```
 BioFlow-CLI/
 ├── bioflow/
-│   ├── __init__.py        # 包元数据
+│   ├── __init__.py        # 包元数据 (版本号等)
 │   ├── main.py            # TUI 入口与主菜单
+│   ├── cli.py             # 非交互式 CLI 接口
 │   ├── i18n.py            # 国际化核心模块
 │   ├── env_manager.py     # 生物工具检测与安装
-│   ├── bio_tasks.py       # 序列格式化任务
+│   ├── bio_tasks.py       # 序列格式化任务逻辑
+│   ├── pipeline.py        # QC 流程管理
+│   ├── preflight.py       # 环境预检
 │   └── locales/
 │       ├── __init__.py    # 语言包注册
 │       ├── en.py          # 英文字符串
@@ -99,9 +115,17 @@ bioflow
 使用命令行参数进行自动化和脚本编写：
 
 ```bash
-# 格式化 FASTA/FASTQ 序列（自动识别）
+# 格式化单文件 FASTA/FASTQ（自动识别）
 bioflow seq --input input.fasta --output output.fasta --width 80
-bioflow seq --input reads.fastq --output reads.formatted.fastq --width 80
+
+# 批量格式化多个文件
+bioflow batch --input-dir ./data --output-dir ./formatted --pattern "*.fasta" --width 80
+
+# 带递归扫描的批量处理
+bioflow batch -i ./data -o ./formatted -p "*.fastq" -r -w 60
+
+# 运行 QC 流程
+bioflow qc --input reads.fastq --output qc_results/ --adapter adapters.fa --minlen 36
 
 # 列出生物工具安装状态
 bioflow env --list
@@ -109,14 +133,9 @@ bioflow env --list
 # 安装指定工具
 bioflow env --install fastqc
 
-# 静默模式（抑制进度消息）
-bioflow --quiet seq --input input.fasta
-
-# JSON 输出（便于解析）
-bioflow --json seq --input input.fasta
-
-# FASTQ 模式会输出质量摘要（平均 Q、Q20、Q30）
-bioflow seq --input reads.fastq
+# JSON 输出（便于自动化集成）
+bioflow --json seq --input reads.fastq
+bioflow --json batch -i ./data -o ./formatted
 ```
 
 #### 退出码
@@ -124,14 +143,14 @@ bioflow seq --input reads.fastq
 | 代码 | 含义 |
 |---|---|
 | `0` | 成功 |
-| `1` | 运行时错误（如：无效的 FASTA/FASTQ 格式、安装失败） |
-| `2` | 参数错误（如：文件不存在、无效参数） |
+| `1` | 运行时错误（如：解析失败、遇错中断） |
+| `2` | 参数错误（如：文件/目录不存在、无效宽度） |
 | `3` | 依赖缺失（如：Conda 未安装） |
 
 #### 输出流
 
-- **stdout**：结果和数据（用于管道传输）
-- **stderr**：进度消息、警告和错误
+- **stdout**：结果数据和 JSON 输出（用于管道传输）
+- **stderr**：进度消息、警告和错误信息
 
 ### 配置文件位置
 
@@ -145,23 +164,20 @@ bioflow seq --input reads.fastq
 
 | 变量 | 说明 | 默认值 |
 |---|---|---|
-| `BIOFLOW_LARGE_FILE_MB` | FASTA/FASTQ 大文件警告阈值（MB） | `500` |
+| `BIOFLOW_LARGE_FILE_MB` | FASTA/FASTQ 大文件警告阈值 (MB) | `500` |
 
-### 主菜单
+## 开发
 
-| 操作 | 说明 |
-|---|---|
-| **[环境] 安装生物工具** | 检测并通过 Conda 安装生物信息学工具 |
-| **[序列] 格式化处理** | 标准化 FASTA/FASTQ 文件格式 |
-| **[质控] QC Pipeline** | 串联 FastQC 和 Trimmomatic 执行质量控制 |
-| **[设置] 切换语言** | 在中文和英文之间切换 |
-| **[退出] 退出程序** | 退出应用 |
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+PYTHONPATH=. pytest -q
+```
 
-## 环境要求
+## 项目状态
 
-- Python 3.9+
-- [Conda](https://docs.conda.io/)（用于安装生物工具）
+当前稳定版本：**v0.2.1**
 
 ## 许可证
 
 本项目基于 MIT 许可证开源。详见 [LICENSE](LICENSE)。
+
