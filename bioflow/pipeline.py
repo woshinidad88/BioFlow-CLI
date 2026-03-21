@@ -87,6 +87,7 @@ def run_qc_pipeline(
     adapter: str | None = None,
     minlen: int = 36,
     cli_mode: bool = False,
+    skip_preflight: bool = False,
 ) -> bool:
     """执行完整的 QC 串联流程：FastQC → Trimmomatic → FastQC。
 
@@ -96,16 +97,15 @@ def run_qc_pipeline(
         adapter: Trimmomatic adapter 文件路径（可选）。
         minlen: Trimmomatic 最短读长阈值，默认 36。
         cli_mode: 是否为 CLI 模式。
+        skip_preflight: 是否跳过预检（TUI 模式下菜单入口已做过预检时可跳过）。
 
     Returns:
         True 表示全部步骤成功。
     """
     # 1. Preflight 检查
-    try:
+    if not skip_preflight:
         if not preflight_check(QC_REQUIRED_TOOLS, cli_mode=cli_mode):
             return False
-    except PreflightError:
-        raise
 
     # 2. 准备输出目录
     if output_dir is None:
@@ -201,5 +201,6 @@ def qc_menu() -> None:
         adapter=adapter,
         minlen=minlen,
         cli_mode=False,
+        skip_preflight=True,
     )
     input(t("press_enter"))

@@ -26,6 +26,9 @@ License text: [MIT License](LICENSE)
   - FASTA formatting with configurable line width
   - FASTQ formatting with auto-detection and quality summary (Avg Q / Q20 / Q30)
   - Batch processing with progress tracking and result tables
+- **Sequence Alignment**:
+  - BWA index + BWA mem + SAMtools sort/index + `samtools flagstat`
+  - Mapping statistics summary for terminal workflows
 - **QC Pipeline**: Integrated FastQC + Trimmomatic workflow
 - **Structured Output**: `--json` output for automation pipelines
 - **Stable Exit Codes**: standardized success/error/dependency signaling
@@ -84,6 +87,9 @@ bioflow batch -i ./data -o ./formatted -p "*.fastq" -r -w 60
 # Run QC pipeline
 bioflow qc --input reads.fastq --output qc_results/ --adapter adapters.fa --minlen 36
 
+# Run alignment pipeline
+bioflow align --ref ref.fa --input reads.fastq --output aligned.bam --threads 4
+
 # List tool status
 bioflow env --list
 
@@ -126,13 +132,14 @@ Environment variable:
 ## Development
 
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
-PYTHONPATH=. pytest -q
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
 ```
 
 ## Project Status
 
-Current stable release: **v0.2.1**
+Current stable release: **v0.3.0**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

@@ -253,6 +253,66 @@ def seq_menu() -> None:
     input(t("press_enter"))
 
 
+def _make_unique_output_path(
+    file_path: Path,
+    input_dir: Path,
+    output_dir: Path,
+    recursive: bool,
+    seen: set[str],
+) -> Path:
+    """生成唯一的输出文件路径，递归模式下加入相对路径前缀避免冲突。"""
+    if recursive:
+        try:
+            rel = file_path.relative_to(input_dir)
+            if rel.parent != Path("."):
+                prefix = str(rel.parent).replace("/", "__").replace("\\", "__")
+                name = f"{prefix}__{file_path.stem}.formatted{file_path.suffix}"
+            else:
+                name = f"{file_path.stem}.formatted{file_path.suffix}"
+        except ValueError:
+            name = f"{file_path.stem}.formatted{file_path.suffix}"
+    else:
+        name = f"{file_path.stem}.formatted{file_path.suffix}"
+
+    # 冲突检测：追加序号
+    base_name = name
+    counter = 1
+    while name in seen:
+        stem, suffix = base_name.rsplit(".", 1) if "." in base_name else (base_name, "")
+        name = f"{stem}_{counter}.{suffix}" if suffix else f"{stem}_{counter}"
+        counter += 1
+    seen.add(name)
+    return output_dir / name
+
+
+def _process_single_file(
+    file_path: Path,
+    output_path: Path,
+    width: int,
+) -> tuple[str, int]:
+    """处理单个序列文件，返回 (格式化输出文本, 序列数)。
+
+    Raises:
+        ValueError: 格式不支持或解析失败。
+    """
+    text = file_path.read_text(encoding="utf-8")
+    seq_format = _detect_sequence_format(text)
+
+    if seq_format not in SUPPORTED_FORMATS:
+        raise ValueError("unsupported_format")
+
+    if seq_format == "fasta":
+        records = _parse_fasta(text)
+        if not records:
+            raise ValueError("parse_error")
+        return _format_fasta(records, width), len(records)
+    else:
+        records = _parse_fastq(text)
+        if not records:
+            raise ValueError("parse_error")
+        return _format_fastq(records, width), len(records)
+
+
 def batch_format_sequences(
     input_dir: Path,
     output_dir: Path,
@@ -278,11 +338,11 @@ def batch_format_sequences(
     """
     # 收集文件
     if recursive:
-        files = list(input_dir.rglob(pattern))
+        files = sorted(input_dir.rglob(pattern))
     else:
-        files = list(input_dir.glob(pattern))
+        files = sorted(input_dir.glob(pattern))
 
-    results = {
+    results: dict[str, list[dict]] = {
         "success": [],
         "failed": [],
         "skipped": [],
@@ -293,6 +353,48 @@ def batch_format_sequences(
 
     # 确保输出目录存在
     output_dir.mkdir(parents=True, exist_ok=True)
+    seen_names: set[str] = set()
+
+    def _handle_file(file_path: Path) -> bool:
+        """处理单个文件，返回 False 表示应中断循环。"""
+        start_time = time.time()
+        try:
+            output_text, count = _process_single_file(file_path, output_dir, width)
+            out_path = _make_unique_output_path(
+                file_path, input_dir, output_dir, recursive, seen_names
+            )
+            out_path.write_text(output_text, encoding="utf-8")
+            results["success"].append({
+                "file": file_path.name,
+                "sequences": count,
+                "output": out_path.name,
+                "time": time.time() - start_time,
+            })
+        except ValueError as ve:
+            reason = str(ve)
+            if reason == "unsupported_format":
+                results["skipped"].append({
+                    "file": file_path.name,
+                    "reason": "unsupported_format",
+                    "time": 0.0,
+                })
+            else:
+                results["failed"].append({
+                    "file": file_path.name,
+                    "error": reason,
+                    "time": time.time() - start_time,
+                })
+                if not continue_on_error:
+                    return False
+        except Exception as e:
+            results["failed"].append({
+                "file": file_path.name,
+                "error": str(e),
+                "time": time.time() - start_time,
+            })
+            if not continue_on_error:
+                return False
+        return True
 
     # 批量处理
     if not quiet:
@@ -305,132 +407,15 @@ def batch_format_sequences(
             console=console,
         ) as progress:
             task = progress.add_task(t("batch_processing"), total=len(files))
-
             for file_path in files:
-                start_time = time.time()
-                try:
-                    # 读取文件
-                    text = file_path.read_text(encoding="utf-8")
-                    seq_format = _detect_sequence_format(text)
-
-                    if seq_format not in SUPPORTED_FORMATS:
-                        results["skipped"].append({
-                            "file": file_path.name,
-                            "reason": "unsupported_format",
-                            "time": 0.0,
-                        })
-                        continue
-
-                    # 解析和格式化
-                    if seq_format == "fasta":
-                        records = _parse_fasta(text)
-                        if not records:
-                            results["failed"].append({
-                                "file": file_path.name,
-                                "error": "parse_error",
-                                "time": time.time() - start_time,
-                            })
-                            if not continue_on_error:
-                                break
-                            continue
-                        output = _format_fasta(records, width)
-                        count = len(records)
-                    else:  # fastq
-                        records = _parse_fastq(text)
-                        if not records:
-                            results["failed"].append({
-                                "file": file_path.name,
-                                "error": "parse_error",
-                                "time": time.time() - start_time,
-                            })
-                            if not continue_on_error:
-                                break
-                            continue
-                        output = _format_fastq(records, width)
-                        count = len(records)
-
-                    # 写入输出文件
-                    output_path = output_dir / f"{file_path.stem}.formatted{file_path.suffix}"
-                    output_path.write_text(output, encoding="utf-8")
-
-                    results["success"].append({
-                        "file": file_path.name,
-                        "sequences": count,
-                        "output": output_path.name,
-                        "time": time.time() - start_time,
-                    })
-
-                except Exception as e:
-                    results["failed"].append({
-                        "file": file_path.name,
-                        "error": str(e),
-                        "time": time.time() - start_time,
-                    })
-                    if not continue_on_error:
-                        break
-                finally:
-                    progress.advance(task)
-    else:
-        # 静默模式：无进度条
-        for file_path in files:
-            start_time = time.time()
-            try:
-                text = file_path.read_text(encoding="utf-8")
-                seq_format = _detect_sequence_format(text)
-
-                if seq_format not in SUPPORTED_FORMATS:
-                    results["skipped"].append({
-                        "file": file_path.name,
-                        "reason": "unsupported_format",
-                        "time": 0.0,
-                    })
-                    continue
-
-                if seq_format == "fasta":
-                    records = _parse_fasta(text)
-                    if not records:
-                        results["failed"].append({
-                            "file": file_path.name,
-                            "error": "parse_error",
-                            "time": time.time() - start_time,
-                        })
-                        if not continue_on_error:
-                            break
-                        continue
-                    output = _format_fasta(records, width)
-                    count = len(records)
-                else:
-                    records = _parse_fastq(text)
-                    if not records:
-                        results["failed"].append({
-                            "file": file_path.name,
-                            "error": "parse_error",
-                            "time": time.time() - start_time,
-                        })
-                        if not continue_on_error:
-                            break
-                        continue
-                    output = _format_fastq(records, width)
-                    count = len(records)
-
-                output_path = output_dir / f"{file_path.stem}.formatted{file_path.suffix}"
-                output_path.write_text(output, encoding="utf-8")
-
-                results["success"].append({
-                    "file": file_path.name,
-                    "sequences": count,
-                    "output": output_path.name,
-                    "time": time.time() - start_time,
-                })
-
-            except Exception as e:
-                results["failed"].append({
-                    "file": file_path.name,
-                    "error": str(e),
-                    "time": time.time() - start_time,
-                })
-                if not continue_on_error:
+                should_continue = _handle_file(file_path)
+                progress.advance(task)
+                if not should_continue:
                     break
+    else:
+        for file_path in files:
+            if not _handle_file(file_path):
+                break
 
     return results
 

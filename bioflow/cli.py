@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +27,7 @@ from bioflow.bio_tasks import (
     display_batch_results,
 )
 from bioflow.env_manager import BIO_TOOLS, _check_conda, _check_installed
+from bioflow.alignment import run_alignment_pipeline
 from bioflow.i18n import init_language, t
 from bioflow.pipeline import run_qc_pipeline
 from bioflow.preflight import PreflightError
@@ -324,7 +324,7 @@ def cmd_env_install(args: argparse.Namespace) -> int:
             print(json.dumps({"error": "unknown_tool", "tool": tool_name}, ensure_ascii=False))
         else:
             console_err.print(f"Error: Unknown tool '{tool_name}'", style="bold red")
-            console_err.print(f"Available tools: {', '.join(t[0] for t in BIO_TOOLS)}")
+            console_err.print(f"Available tools: {', '.join(tool_entry[0] for tool_entry in BIO_TOOLS)}")
         return EXIT_ARGUMENT_ERROR
 
     name, exe, cmd = tool_info
@@ -415,6 +415,75 @@ def cmd_qc(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
 
 
+def cmd_align(args: argparse.Namespace) -> int:
+    """处理 align 子命令：序列比对流程。"""
+    ref_path = Path(args.ref)
+    input_path = Path(args.input)
+    quiet = args.quiet or args.json
+    threads = args.threads
+
+    # 参数校验
+    if not ref_path.exists():
+        if args.json:
+            print(json.dumps({"error": "file_not_found", "path": str(ref_path)}, ensure_ascii=False))
+        else:
+            console_err.print(t("seq_file_not_found", path=str(ref_path)), style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if not input_path.exists():
+        if args.json:
+            print(json.dumps({"error": "file_not_found", "path": str(input_path)}, ensure_ascii=False))
+        else:
+            console_err.print(t("seq_file_not_found", path=str(input_path)), style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if threads <= 0:
+        if args.json:
+            print(json.dumps({"error": "invalid_threads", "threads": threads}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: threads must be positive (got {threads})", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    output_path = Path(args.output) if args.output else None
+
+    try:
+        stats = run_alignment_pipeline(
+            ref_path,
+            input_path,
+            output=output_path,
+            threads=threads,
+            cli_mode=True,
+        )
+        if stats is not None:
+            if args.json:
+                payload = {
+                    "status": "success",
+                    "ref": str(ref_path),
+                    "input": str(input_path),
+                    "output": str(output_path or input_path.parent / f"{input_path.stem}.sorted.bam"),
+                    "stats": {
+                        "total": stats["total"],
+                        "mapped": stats["mapped"],
+                        "unmapped": stats["unmapped"],
+                        "mapping_rate": round(float(stats["mapping_rate"]), 6),
+                    },
+                }
+                print(json.dumps(payload, ensure_ascii=False))
+            return EXIT_SUCCESS
+        else:
+            return EXIT_RUNTIME_ERROR
+    except PreflightError as exc:
+        if args.json:
+            print(json.dumps({"error": "dependency_missing", "tools": exc.missing_tools}, ensure_ascii=False))
+        return EXIT_DEPENDENCY_MISSING
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"error": "runtime_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(t("error_unexpected", err=str(exc)), style="bold red")
+        return EXIT_RUNTIME_ERROR
+
+
 def main() -> int:
     """CLI 主入口。"""
     parser = argparse.ArgumentParser(
@@ -456,6 +525,13 @@ def main() -> int:
     parser_batch.add_argument("--width", "-w", type=int, default=80, help="Line width (default: 80)")
     parser_batch.add_argument("--continue-on-error", "-c", action="store_true", help="Continue processing on error")
 
+    # align 子命令
+    parser_align = subparsers.add_parser("align", help="Run alignment pipeline (BWA + SAMtools)")
+    parser_align.add_argument("--ref", "-r", required=True, help="Reference genome FASTA file")
+    parser_align.add_argument("--input", "-i", required=True, help="Input reads file (FASTQ)")
+    parser_align.add_argument("--output", "-o", help="Output BAM file (default: input.sorted.bam)")
+    parser_align.add_argument("--threads", "-t", type=int, default=1, help="Number of threads (default: 1)")
+
     args = parser.parse_args()
 
     # 初始化
@@ -472,8 +548,12 @@ def main() -> int:
             return cmd_env_list(args)
         elif args.install:
             return cmd_env_install(args)
+        else:
+            return EXIT_ARGUMENT_ERROR
     elif args.command == "qc":
         return cmd_qc(args)
+    elif args.command == "align":
+        return cmd_align(args)
     else:
         parser.print_help(sys.stderr)
         return EXIT_ARGUMENT_ERROR

@@ -26,6 +26,7 @@ BioFlow-CLI 是一个基于 **MIT 许可证** 发布的 **开源项目**。
 - **环境管理器** — 一键检测和安装常用生物工具（FastQC、SAMtools、BWA、BLAST+、Trimmomatic），通过 Conda 管理
 - **序列格式化** — 标准化 FASTA/FASTQ 文件，支持自定义行宽
 - **批量处理** — 支持目录递归扫描、多文件并行逻辑处理、进度跟踪及统计表格
+- **序列比对** — 集成 BWA + SAMtools 完整流程，支持建索引、比对、排序、BAM 索引与比对统计
 - **QC 流程** — 集成 FastQC + Trimmomatic 的质量控制流水线
 - **模块化设计** — 职责清晰分离，易于扩展
 
@@ -82,6 +83,7 @@ BioFlow-CLI/
 │   ├── i18n.py            # 国际化核心模块
 │   ├── env_manager.py     # 生物工具检测与安装
 │   ├── bio_tasks.py       # 序列格式化任务逻辑
+│   ├── alignment.py       # 序列比对流程
 │   ├── pipeline.py        # QC 流程管理
 │   ├── preflight.py       # 环境预检
 │   └── locales/
@@ -127,6 +129,9 @@ bioflow batch -i ./data -o ./formatted -p "*.fastq" -r -w 60
 # 运行 QC 流程
 bioflow qc --input reads.fastq --output qc_results/ --adapter adapters.fa --minlen 36
 
+# 运行序列比对流程
+bioflow align --ref ref.fa --input reads.fastq --output aligned.bam --threads 4
+
 # 列出生物工具安装状态
 bioflow env --list
 
@@ -145,7 +150,7 @@ bioflow --json batch -i ./data -o ./formatted
 | `0` | 成功 |
 | `1` | 运行时错误（如：解析失败、遇错中断） |
 | `2` | 参数错误（如：文件/目录不存在、无效宽度） |
-| `3` | 依赖缺失（如：Conda 未安装） |
+| `3` | 依赖缺失（如：Conda、BWA、SAMtools 等未安装） |
 
 #### 输出流
 
@@ -169,15 +174,15 @@ bioflow --json batch -i ./data -o ./formatted
 ## 开发
 
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
-PYTHONPATH=. pytest -q
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
 ```
 
 ## 项目状态
 
-当前稳定版本：**v0.2.1**
+当前稳定版本：**v0.3.0**
 
 ## 许可证
 
 本项目基于 MIT 许可证开源。详见 [LICENSE](LICENSE)。
-

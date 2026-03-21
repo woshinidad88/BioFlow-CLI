@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from bioflow import __version__
+from bioflow.alignment import align_menu
 from bioflow.bio_tasks import seq_menu
 from bioflow.env_manager import env_menu
 from bioflow.pipeline import qc_menu
@@ -82,6 +83,7 @@ def main_menu() -> None:
             t("menu_env"),
             t("menu_seq"),
             t("menu_qc"),
+            t("menu_align"),
             t("menu_settings"),
             t("menu_exit"),
         ]
@@ -107,6 +109,8 @@ def main_menu() -> None:
             seq_menu()
         elif answer == t("menu_qc"):
             qc_menu()
+        elif answer == t("menu_align"):
+            align_menu()
         elif answer == t("menu_settings"):
             select_language()
 
