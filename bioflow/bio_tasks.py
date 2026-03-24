@@ -2,34 +2,22 @@
 
 from __future__ import annotations
 
-import os
 import re
+import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TextIO
 
 import questionary
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, track
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from bioflow.i18n import t
 
 console = Console()
-
-
-def _parse_env_int(key: str, default: int) -> int:
-    """安全解析整型环境变量，非法值静默回退到默认值。"""
-    raw = os.environ.get(key)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
-LARGE_FILE_WARNING_MB = _parse_env_int("BIOFLOW_LARGE_FILE_MB", 500)
 
 SUPPORTED_FORMATS = ("fasta", "fastq")
 
@@ -157,6 +145,199 @@ def _fastq_quality_stats(records: list[tuple[str, str, str, str]]) -> dict[str, 
     }
 
 
+def _detect_sequence_format_in_handle(handle: TextIO) -> str | None:
+    """从文本流中识别序列格式，并在结束后复位到原位置。"""
+    start = handle.tell()
+    try:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                return "fasta"
+            if line.startswith("@"):
+                return "fastq"
+            return None
+        return None
+    finally:
+        handle.seek(start)
+
+
+def _iter_fasta_records(handle: TextIO) -> Iterator[tuple[str, str]]:
+    """流式解析 FASTA 记录。"""
+    current_header: str | None = None
+    current_seq: list[str] = []
+
+    for raw_line in handle:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith(">"):
+            if current_header is not None:
+                yield current_header, "".join(current_seq)
+            current_header = line
+            current_seq = []
+            continue
+        if current_header is None:
+            raise ValueError("parse_error")
+        current_seq.append(re.sub(r"\s+", "", line))
+
+    if current_header is None:
+        raise ValueError("parse_error")
+
+    yield current_header, "".join(current_seq)
+
+
+def _read_next_nonempty_line(handle: TextIO) -> str | None:
+    """读取下一个非空行。"""
+    for raw_line in handle:
+        if raw_line.strip():
+            return raw_line
+    return None
+
+
+def _iter_fastq_records(handle: TextIO) -> Iterator[tuple[str, str, str, str]]:
+    """流式解析 FASTQ 记录。"""
+    while True:
+        header_line = _read_next_nonempty_line(handle)
+        if header_line is None:
+            return
+
+        header = header_line.strip()
+        if not header.startswith("@"):
+            raise ValueError("parse_error")
+
+        seq_line = handle.readline()
+        plus_line = handle.readline()
+        qual_line = handle.readline()
+
+        if not seq_line or not plus_line or not qual_line:
+            raise ValueError("parse_error")
+
+        seq = re.sub(r"\s+", "", seq_line.strip())
+        plus = plus_line.strip()
+        qual = re.sub(r"\s+", "", qual_line.strip())
+
+        if not plus.startswith("+"):
+            raise ValueError("parse_error")
+        if not seq or not qual or len(seq) != len(qual):
+            raise ValueError("parse_error")
+
+        yield header, seq, plus, qual
+
+
+def _create_fastq_stats() -> dict[str, float]:
+    """创建流式 FASTQ 统计容器。"""
+    return {
+        "total_bases": 0.0,
+        "total_score": 0.0,
+        "q20_bases": 0.0,
+        "q30_bases": 0.0,
+    }
+
+
+def _update_fastq_stats(stats: dict[str, float], qual: str) -> None:
+    """更新 FASTQ 质量统计。"""
+    for ch in qual:
+        score = ord(ch) - 33
+        stats["total_bases"] += 1
+        stats["total_score"] += score
+        if score >= 20:
+            stats["q20_bases"] += 1
+        if score >= 30:
+            stats["q30_bases"] += 1
+
+
+def _finalize_fastq_stats(stats: dict[str, float]) -> dict[str, float]:
+    """将流式质量统计转换为对外结构。"""
+    total_bases = stats["total_bases"]
+    if total_bases == 0:
+        return {"avg_q": 0.0, "q20_ratio": 0.0, "q30_ratio": 0.0, "bases": 0.0}
+
+    return {
+        "avg_q": stats["total_score"] / total_bases,
+        "q20_ratio": stats["q20_bases"] / total_bases,
+        "q30_ratio": stats["q30_bases"] / total_bases,
+        "bases": total_bases,
+    }
+
+
+def _stream_format_fasta(
+    src_handle: TextIO,
+    dst_handle: TextIO,
+    width: int,
+) -> int:
+    """流式格式化 FASTA 并返回记录数。"""
+    count = 0
+    for header, seq in _iter_fasta_records(src_handle):
+        dst_handle.write(f"{header}\n")
+        dst_handle.write(_wrap_sequence(seq.upper(), width))
+        dst_handle.write("\n")
+        count += 1
+    return count
+
+
+def _stream_format_fastq(
+    src_handle: TextIO,
+    dst_handle: TextIO,
+    width: int,
+) -> tuple[int, dict[str, float]]:
+    """流式格式化 FASTQ 并返回记录数与质量统计。"""
+    count = 0
+    stats = _create_fastq_stats()
+    for header, seq, plus, qual in _iter_fastq_records(src_handle):
+        seq_upper = seq.upper()
+        dst_handle.write(f"{header}\n")
+        dst_handle.write(_wrap_sequence(seq_upper, width))
+        dst_handle.write(f"\n{plus}\n")
+        dst_handle.write(_wrap_sequence(qual, width))
+        dst_handle.write("\n")
+        _update_fastq_stats(stats, qual)
+        count += 1
+    return count, _finalize_fastq_stats(stats)
+
+
+def format_sequence_file(
+    input_path: Path,
+    output_path: Path,
+    width: int = 80,
+) -> tuple[str, int, dict[str, float] | None]:
+    """流式格式化单个序列文件并写入目标路径。"""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+
+    with input_path.open("r", encoding="utf-8") as src_handle:
+        seq_format = _detect_sequence_format_in_handle(src_handle)
+        if seq_format not in SUPPORTED_FORMATS:
+            raise ValueError("invalid_format")
+
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_handle:
+            temp_path = Path(tmp_handle.name)
+            try:
+                if seq_format == "fasta":
+                    count = _stream_format_fasta(src_handle, tmp_handle, width)
+                    stats = None
+                else:
+                    count, stats = _stream_format_fastq(src_handle, tmp_handle, width)
+            except Exception:
+                tmp_handle.close()
+                temp_path.unlink(missing_ok=True)
+                raise
+
+    if temp_path is None:
+        raise ValueError("runtime_error")
+
+    temp_path.replace(output_path)
+    return seq_format, count, stats
+
+
 def seq_menu() -> None:
     """序列格式化交互菜单。"""
     console.print(Panel(t("seq_title"), style="bold magenta"))
@@ -174,13 +355,6 @@ def seq_menu() -> None:
         input(t("press_enter"))
         return
 
-    # 大文件警告
-    file_size_mb = src.stat().st_size / (1024 * 1024)
-    if file_size_mb > LARGE_FILE_WARNING_MB:
-        console.print(
-            t("seq_large_file_warn", size=f"{file_size_mb:.0f}"), style="bold yellow"
-        )
-
     default_suffix = src.suffix if src.suffix else ".fasta"
     default_output = src.with_name(f"{src.stem}.formatted{default_suffix}")
     try:
@@ -197,47 +371,17 @@ def seq_menu() -> None:
     width = max(1, width)  # 钳位，防止 range step=0 崩溃
 
     console.print(t("seq_processing"), style="cyan")
-    text = src.read_text(encoding="utf-8")
-    seq_format = _detect_sequence_format(text)
-
-    if seq_format not in SUPPORTED_FORMATS:
+    try:
+        _seq_format, count, fastq_stats = format_sequence_file(
+            src,
+            Path(output_path),
+            width,
+        )
+    except ValueError:
         console.print(t("seq_invalid_format"), style="bold red")
         input(t("press_enter"))
         return
 
-    output_lines: list[str] = []
-    count = 0
-    fastq_stats: dict[str, float] | None = None
-
-    if seq_format == "fasta":
-        records = _parse_fasta(text)
-        if not records:
-            console.print(t("seq_invalid_format"), style="bold red")
-            input(t("press_enter"))
-            return
-
-        # 进度条绑定真实格式化工作
-        for header, seq in track(records, description=t("seq_processing")):
-            output_lines.append(header)
-            output_lines.append(_wrap_sequence(seq.upper(), width))
-        count = len(records)
-    else:
-        records = _parse_fastq(text)
-        if not records:
-            console.print(t("seq_invalid_format"), style="bold red")
-            input(t("press_enter"))
-            return
-        for header, seq, plus, qual in track(records, description=t("seq_processing")):
-            output_lines.append(header)
-            output_lines.append(_wrap_sequence(seq.upper(), width))
-            output_lines.append(plus)
-            output_lines.append(_wrap_sequence(qual, width))
-        fastq_stats = _fastq_quality_stats(records)
-        count = len(records)
-
-    output = "\n".join(output_lines) + "\n"
-
-    Path(output_path).write_text(output, encoding="utf-8")
     console.print(t("seq_done", count=count, path=output_path), style="bold green")
     if fastq_stats:
         console.print(
@@ -290,27 +434,21 @@ def _process_single_file(
     output_path: Path,
     width: int,
 ) -> tuple[str, int]:
-    """处理单个序列文件，返回 (格式化输出文本, 序列数)。
+    """处理单个序列文件，返回 (格式化后的格式类型, 序列数)。
 
     Raises:
         ValueError: 格式不支持或解析失败。
     """
-    text = file_path.read_text(encoding="utf-8")
-    seq_format = _detect_sequence_format(text)
-
-    if seq_format not in SUPPORTED_FORMATS:
-        raise ValueError("unsupported_format")
-
-    if seq_format == "fasta":
-        records = _parse_fasta(text)
-        if not records:
-            raise ValueError("parse_error")
-        return _format_fasta(records, width), len(records)
-    else:
-        records = _parse_fastq(text)
-        if not records:
-            raise ValueError("parse_error")
-        return _format_fastq(records, width), len(records)
+    try:
+        seq_format, count, _stats = format_sequence_file(file_path, output_path, width)
+    except ValueError as exc:
+        if str(exc) == "invalid_format":
+            with file_path.open("r", encoding="utf-8") as handle:
+                detected = _detect_sequence_format_in_handle(handle)
+            if detected not in SUPPORTED_FORMATS:
+                raise ValueError("unsupported_format") from exc
+        raise ValueError("parse_error") from exc
+    return seq_format, count
 
 
 def batch_format_sequences(
@@ -358,12 +496,18 @@ def batch_format_sequences(
     def _handle_file(file_path: Path) -> bool:
         """处理单个文件，返回 False 表示应中断循环。"""
         start_time = time.time()
+        if not file_path.is_file():
+            results["skipped"].append({
+                "file": file_path.name,
+                "reason": "unsupported_format",
+                "time": 0.0,
+            })
+            return True
         try:
-            output_text, count = _process_single_file(file_path, output_dir, width)
             out_path = _make_unique_output_path(
                 file_path, input_dir, output_dir, recursive, seen_names
             )
-            out_path.write_text(output_text, encoding="utf-8")
+            _seq_format, count = _process_single_file(file_path, out_path, width)
             results["success"].append({
                 "file": file_path.name,
                 "sequences": count,
@@ -484,4 +628,3 @@ def display_batch_results(results: dict[str, list[dict]]) -> None:
         ),
         style="bold cyan",
     )
-

@@ -25,6 +25,7 @@ License text: [MIT License](LICENSE)
 - **Sequence Formatting**:
   - FASTA formatting with configurable line width
   - FASTQ formatting with auto-detection and quality summary (Avg Q / Q20 / Q30)
+  - Streaming read/write path for large files with lower memory usage
   - Batch processing with progress tracking and result tables
 - **Sequence Alignment**:
   - BWA index + BWA mem + SAMtools sort/index + `samtools flagstat`
@@ -125,10 +126,6 @@ Language config is saved per OS:
 - Linux: `~/.config/bioflow/config.json` (or `$XDG_CONFIG_HOME/bioflow/`)
 - Windows: `%APPDATA%\bioflow\config.json`
 
-Environment variable:
-
-- `BIOFLOW_LARGE_FILE_MB`: large file warning threshold (default `500`)
-
 ## Development
 
 ```bash
@@ -139,7 +136,7 @@ pip install -e ".[dev]"
 
 ## Project Status
 
-Current stable release: **v0.3.0**
+Current development version: **v0.3.1**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

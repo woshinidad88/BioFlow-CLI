@@ -24,7 +24,7 @@ BioFlow-CLI 是一个基于 **MIT 许可证** 发布的 **开源项目**。
 - **双模式运行** — 提供交互式 TUI (`bioflow`) 和脚本友好的 CLI (`bioflow ...`)
 - **国际化支持** — 完整的中英文本地化；首次运行时选择语言，偏好保存至用户配置目录
 - **环境管理器** — 一键检测和安装常用生物工具（FastQC、SAMtools、BWA、BLAST+、Trimmomatic），通过 Conda 管理
-- **序列格式化** — 标准化 FASTA/FASTQ 文件，支持自定义行宽
+- **序列格式化** — 标准化 FASTA/FASTQ 文件，支持自定义行宽，并使用流式读写降低大文件内存占用
 - **批量处理** — 支持目录递归扫描、多文件并行逻辑处理、进度跟踪及统计表格
 - **序列比对** — 集成 BWA + SAMtools 完整流程，支持建索引、比对、排序、BAM 索引与比对统计
 - **QC 流程** — 集成 FastQC + Trimmomatic 的质量控制流水线
@@ -165,12 +165,6 @@ bioflow --json batch -i ./data -o ./formatted
 | Linux | `~/.config/bioflow/config.json`（或 `$XDG_CONFIG_HOME/bioflow/`） |
 | Windows | `%APPDATA%\bioflow\config.json` |
 
-### 环境变量
-
-| 变量 | 说明 | 默认值 |
-|---|---|---|
-| `BIOFLOW_LARGE_FILE_MB` | FASTA/FASTQ 大文件警告阈值 (MB) | `500` |
-
 ## 开发
 
 ```bash
@@ -181,7 +175,7 @@ pip install -e ".[dev]"
 
 ## 项目状态
 
-当前稳定版本：**v0.3.0**
+当前开发版本：**v0.3.1**
 
 ## 许可证
 

@@ -15,16 +15,9 @@ from rich.console import Console
 
 from bioflow import __version__
 from bioflow.bio_tasks import (
-    LARGE_FILE_WARNING_MB,
-    SUPPORTED_FORMATS,
-    _detect_sequence_format,
-    _fastq_quality_stats,
-    _format_fasta,
-    _format_fastq,
-    _parse_fasta,
-    _parse_fastq,
     batch_format_sequences,
     display_batch_results,
+    format_sequence_file,
 )
 from bioflow.env_manager import BIO_TOOLS, _check_conda, _check_installed
 from bioflow.alignment import run_alignment_pipeline
@@ -89,20 +82,16 @@ def cmd_seq(args: argparse.Namespace) -> int:
 
     # 读取和解析
     try:
-        # 大文件警告（与 TUI 保持一致）
-        file_size_mb = input_path.stat().st_size / (1024 * 1024)
-        if file_size_mb > LARGE_FILE_WARNING_MB and not quiet:
-            console_err.print(
-                t("seq_large_file_warn", size=f"{file_size_mb:.0f}"),
-                style="bold yellow"
-            )
-
         if not quiet:
             console_err.print(t("seq_processing"), style="cyan")
 
-        text = input_path.read_text(encoding="utf-8")
-        seq_format = _detect_sequence_format(text)
-        if seq_format not in SUPPORTED_FORMATS:
+        try:
+            seq_format, count, fastq_stats = format_sequence_file(
+                input_path,
+                output_path,
+                width,
+            )
+        except ValueError:
             if args.json:
                 print(
                     json.dumps(
@@ -114,39 +103,6 @@ def cmd_seq(args: argparse.Namespace) -> int:
                 console_err.print(t("seq_invalid_format"), style="bold red")
             return EXIT_RUNTIME_ERROR
 
-        fastq_stats: dict[str, float] | None = None
-        if seq_format == "fasta":
-            records = _parse_fasta(text)
-            if not records:
-                if args.json:
-                    print(
-                        json.dumps(
-                            {"error": "invalid_format", "path": str(input_path)},
-                            ensure_ascii=False,
-                        )
-                    )
-                else:
-                    console_err.print(t("seq_invalid_format"), style="bold red")
-                return EXIT_RUNTIME_ERROR
-            output = _format_fasta(records, width)
-        else:
-            records = _parse_fastq(text)
-            if not records:
-                if args.json:
-                    print(
-                        json.dumps(
-                            {"error": "invalid_format", "path": str(input_path)},
-                            ensure_ascii=False,
-                        )
-                    )
-                else:
-                    console_err.print(t("seq_invalid_format"), style="bold red")
-                return EXIT_RUNTIME_ERROR
-            output = _format_fastq(records, width)
-            fastq_stats = _fastq_quality_stats(records)
-
-        output_path.write_text(output, encoding="utf-8")
-
         # 输出结果
         if args.json:
             payload: dict[str, Any] = {
@@ -154,7 +110,7 @@ def cmd_seq(args: argparse.Namespace) -> int:
                 "input": str(input_path),
                 "output": str(output_path),
                 "format": seq_format,
-                "records": len(records),
+                "records": count,
                 "width": width,
             }
             if fastq_stats:
@@ -170,7 +126,7 @@ def cmd_seq(args: argparse.Namespace) -> int:
         else:
             if not quiet:
                 console_err.print(
-                    t("seq_done", count=len(records), path=str(output_path)),
+                    t("seq_done", count=count, path=str(output_path)),
                     style="bold green"
                 )
             if fastq_stats:

@@ -74,7 +74,6 @@ STRINGS = {
     "error_unexpected": "发生意外错误：{err}",
     "press_enter": "按 Enter 键继续...",
     "env_conda_missing": "未检测到 Conda，请先安装 Conda（https://docs.conda.io/）。",
-    "seq_large_file_warn": "警告：文件大小为 {size} MB，可能占用大量内存。",
 
     # === 质控流程 ===
     "menu_qc": "[质控] QC Pipeline",
