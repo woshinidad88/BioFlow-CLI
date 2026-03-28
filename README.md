@@ -30,6 +30,9 @@ License text: [MIT License](LICENSE)
 - **Sequence Alignment**:
   - BWA index + BWA mem + SAMtools sort/index + `samtools flagstat`
   - Mapping statistics summary for terminal workflows
+- **BLAST Search**:
+  - `makeblastdb` + `blastn` nucleotide search workflow
+  - Tabular result output (`outfmt 6`) for downstream analysis
 - **QC Pipeline**: Integrated FastQC + Trimmomatic workflow
 - **Structured Output**: `--json` output for automation pipelines
 - **Stable Exit Codes**: standardized success/error/dependency signaling
@@ -94,6 +97,9 @@ bioflow qc --input reads.fastq --output qc_results/ --adapter adapters.fa --minl
 # Run alignment pipeline
 bioflow align --ref ref.fa --input reads.fastq --output aligned.bam --threads 4
 
+# Run BLAST nucleotide search
+bioflow search --db ref.fa --query query.fa --output hits.tsv --evalue 1e-5 --max-target-seqs 20
+
 # List tool status
 bioflow env --list
 
@@ -145,7 +151,7 @@ pip install -e .
 
 ## Project Status
 
-Current development version: **v0.4.0**
+Current development version: **v0.4.1**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

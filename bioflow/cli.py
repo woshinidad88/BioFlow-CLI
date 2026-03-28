@@ -24,6 +24,7 @@ from bioflow.alignment import run_alignment_pipeline
 from bioflow.i18n import init_language, t
 from bioflow.pipeline import run_qc_pipeline
 from bioflow.preflight import PreflightError
+from bioflow.search import run_blast_search
 
 # 退出码标准
 EXIT_SUCCESS = 0
@@ -450,6 +451,77 @@ def cmd_align(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
 
 
+def cmd_search(args: argparse.Namespace) -> int:
+    """处理 search 子命令：BLAST 检索流程。"""
+    db_path = Path(args.db)
+    query_path = Path(args.query)
+    evalue = args.evalue
+    max_target_seqs = args.max_target_seqs
+
+    if not db_path.exists():
+        if args.json:
+            print(json.dumps({"error": "file_not_found", "path": str(db_path)}, ensure_ascii=False))
+        else:
+            console_err.print(t("seq_file_not_found", path=str(db_path)), style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if not query_path.exists():
+        if args.json:
+            print(json.dumps({"error": "file_not_found", "path": str(query_path)}, ensure_ascii=False))
+        else:
+            console_err.print(t("seq_file_not_found", path=str(query_path)), style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if evalue <= 0:
+        if args.json:
+            print(json.dumps({"error": "invalid_evalue", "evalue": evalue}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: evalue must be positive (got {evalue})", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if max_target_seqs <= 0:
+        if args.json:
+            print(
+                json.dumps(
+                    {"error": "invalid_max_target_seqs", "max_target_seqs": max_target_seqs},
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            console_err.print(
+                f"Error: max_target_seqs must be positive (got {max_target_seqs})",
+                style="bold red",
+            )
+        return EXIT_ARGUMENT_ERROR
+
+    output_path = Path(args.output) if args.output else None
+
+    try:
+        result = run_blast_search(
+            db_path,
+            query_path,
+            output=output_path,
+            evalue=evalue,
+            max_target_seqs=max_target_seqs,
+            cli_mode=True,
+        )
+        if result is None:
+            return EXIT_RUNTIME_ERROR
+        if args.json:
+            print(json.dumps({"status": "success", **result}, ensure_ascii=False))
+        return EXIT_SUCCESS
+    except PreflightError as exc:
+        if args.json:
+            print(json.dumps({"error": "dependency_missing", "tools": exc.missing_tools}, ensure_ascii=False))
+        return EXIT_DEPENDENCY_MISSING
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"error": "runtime_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(t("error_unexpected", err=str(exc)), style="bold red")
+        return EXIT_RUNTIME_ERROR
+
+
 def main() -> int:
     """CLI 主入口。"""
     parser = argparse.ArgumentParser(
@@ -499,6 +571,19 @@ def main() -> int:
     parser_align.add_argument("--output", "-o", help="Output BAM file (default: input.sorted.bam)")
     parser_align.add_argument("--threads", "-t", type=int, default=1, help="Number of threads (default: 1)")
 
+    # search 子命令
+    parser_search = subparsers.add_parser("search", help="Run BLAST nucleotide search")
+    parser_search.add_argument("--db", required=True, help="Reference database FASTA file")
+    parser_search.add_argument("--query", "-q", required=True, help="Query FASTA file")
+    parser_search.add_argument("--output", "-o", help="Output TSV file (default: query.blast.tsv)")
+    parser_search.add_argument("--evalue", type=float, default=10.0, help="E-value threshold (default: 10.0)")
+    parser_search.add_argument(
+        "--max-target-seqs",
+        type=int,
+        default=10,
+        help="Maximum target sequences per query (default: 10)",
+    )
+
     args = parser.parse_args()
 
     # 初始化
@@ -521,6 +606,8 @@ def main() -> int:
         return cmd_qc(args)
     elif args.command == "align":
         return cmd_align(args)
+    elif args.command == "search":
+        return cmd_search(args)
     else:
         parser.print_help(sys.stderr)
         return EXIT_ARGUMENT_ERROR

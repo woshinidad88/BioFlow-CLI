@@ -5,6 +5,7 @@ STRINGS = {
     "menu_env": "[Environment] Install Bio-tools",
     "menu_seq": "[Sequence] Formatting",
     "menu_align": "[Alignment] Sequence Alignment",
+    "menu_search": "[Search] BLAST Search",
     "menu_settings": "[Settings] Change Language",
     "menu_exit": "[Exit] Quit",
 
@@ -65,6 +66,22 @@ STRINGS = {
     "align_step_map_sort": "BWA mem + SAMtools sort",
     "align_step_bam_index": "SAMtools index",
     "align_step_flagstat": "SAMtools flagstat",
+
+    # === Search ===
+    "search_title": "BLAST Search",
+    "search_db_prompt": "Enter reference database FASTA path:",
+    "search_query_prompt": "Enter query FASTA path:",
+    "search_output_prompt": "Enter output TSV path:",
+    "search_evalue_prompt": "E-value threshold (default 10.0):",
+    "search_max_targets_prompt": "Maximum target sequences (default 10):",
+    "search_pipeline_start": "Starting BLAST search for: {file}",
+    "search_pipeline_done": "BLAST search completed! Output: {output} | Hits: {hits}",
+    "search_step_failed": "Search step failed ({step}): {err}",
+    "search_building_db": "Building BLAST database for {file}...",
+    "search_running_blastn": "Running blastn for {file}...",
+    "search_db_cached": "[Step 1/2] makeblastdb (cached)",
+    "search_step_makeblastdb": "[Step 1/2] makeblastdb",
+    "search_step_blastn": "[Step 2/2] blastn",
 
     # === General ===
     "confirm_exit": "Are you sure you want to exit?",

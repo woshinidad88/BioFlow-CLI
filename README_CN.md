@@ -27,6 +27,7 @@ BioFlow-CLI 是一个基于 **MIT 许可证** 发布的 **开源项目**。
 - **序列格式化** — 标准化 FASTA/FASTQ 文件，支持自定义行宽，并使用流式读写降低大文件内存占用
 - **批量处理** — 支持目录递归扫描、多进程加速、多文件处理、进度跟踪及统计表格
 - **序列比对** — 集成 BWA + SAMtools 完整流程，支持建索引、比对、排序、BAM 索引与比对统计
+- **BLAST 检索** — 集成 `makeblastdb` + `blastn` 基础核酸检索流程，输出标准 tabular 结果
 - **QC 流程** — 集成 FastQC + Trimmomatic 的质量控制流水线
 
 ## 快速开始
@@ -83,6 +84,7 @@ BioFlow-CLI/
 │   ├── env_manager.py     # 生物工具检测与安装
 │   ├── bio_tasks.py       # 序列格式化任务逻辑
 │   ├── alignment.py       # 序列比对流程
+│   ├── search.py          # BLAST 检索流程
 │   ├── pipeline.py        # QC 流程管理
 │   ├── preflight.py       # 环境预检
 │   └── locales/
@@ -134,6 +136,9 @@ bioflow qc --input reads.fastq --output qc_results/ --adapter adapters.fa --minl
 # 运行序列比对流程
 bioflow align --ref ref.fa --input reads.fastq --output aligned.bam --threads 4
 
+# 运行 BLAST 核酸检索
+bioflow search --db ref.fa --query query.fa --output hits.tsv --evalue 1e-5 --max-target-seqs 20
+
 # 列出生物工具安装状态
 bioflow env --list
 
@@ -183,7 +188,7 @@ pip install -e .
 
 ## 项目状态
 
-当前开发版本：**v0.4.0**
+当前开发版本：**v0.4.1**
 
 ## 许可证
 

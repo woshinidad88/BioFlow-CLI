@@ -15,6 +15,7 @@ TOOL_REGISTRY: dict[str, tuple[str, str]] = {
     "trimmomatic": ("trimmomatic", "conda install -y -c bioconda trimmomatic"),
     "samtools": ("samtools", "conda install -y -c bioconda samtools"),
     "bwa": ("bwa", "conda install -y -c bioconda bwa"),
+    "makeblastdb": ("makeblastdb", "conda install -y -c bioconda blast"),
     "blastn": ("blastn", "conda install -y -c bioconda blast"),
 }
 

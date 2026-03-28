@@ -5,6 +5,7 @@ STRINGS = {
     "menu_env": "[环境] 安装生物工具",
     "menu_seq": "[序列] 格式化处理",
     "menu_align": "[比对] 序列比对",
+    "menu_search": "[检索] BLAST 检索",
     "menu_settings": "[设置] 切换语言",
     "menu_exit": "[退出] 退出程序",
 
@@ -65,6 +66,22 @@ STRINGS = {
     "align_step_map_sort": "BWA mem + SAMtools 排序",
     "align_step_bam_index": "SAMtools 建索引",
     "align_step_flagstat": "SAMtools flagstat",
+
+    # === BLAST 检索 ===
+    "search_title": "BLAST 检索",
+    "search_db_prompt": "请输入参考数据库 FASTA 路径：",
+    "search_query_prompt": "请输入查询 FASTA 路径：",
+    "search_output_prompt": "请输入输出 TSV 路径：",
+    "search_evalue_prompt": "E-value 阈值（默认 10.0）：",
+    "search_max_targets_prompt": "最大目标序列数（默认 10）：",
+    "search_pipeline_start": "开始 BLAST 检索：{file}",
+    "search_pipeline_done": "BLAST 检索完成！输出：{output} | 命中数：{hits}",
+    "search_step_failed": "检索步骤失败（{step}）：{err}",
+    "search_building_db": "正在为 {file} 构建 BLAST 数据库...",
+    "search_running_blastn": "正在运行 blastn：{file}...",
+    "search_db_cached": "[步骤 1/2] makeblastdb（已缓存）",
+    "search_step_makeblastdb": "[步骤 1/2] makeblastdb",
+    "search_step_blastn": "[步骤 2/2] blastn",
 
     # === 通用 ===
     "confirm_exit": "确定要退出吗？",
