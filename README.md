@@ -100,6 +100,9 @@ bioflow align --ref ref.fa --input reads.fastq --output aligned.bam --threads 4
 # Run BLAST nucleotide search
 bioflow search --db ref.fa --query query.fa --output hits.tsv --evalue 1e-5 --max-target-seqs 20
 
+# Show only top 3 summarized hits
+bioflow search --db ref.fa --query query.fa --output hits.tsv --top 3
+
 # List tool status
 bioflow env --list
 
@@ -127,6 +130,12 @@ bioflow --json batch -i ./data -o ./formatted
 - `stdout`: normal result data (including JSON)
 - `stderr`: progress, warnings, and errors
 
+### Search Summary
+
+- `bioflow search --top N` controls how many top hits are summarized
+- JSON mode now includes `summary.best_hit`, `summary.top_hits`, and aggregate hit statistics
+- Raw BLAST tabular output is still written to the TSV file
+
 ### Batch Concurrency
 
 - `bioflow batch --workers N` enables multi-process batch formatting
@@ -151,7 +160,7 @@ pip install -e .
 
 ## Project Status
 
-Current development version: **v0.4.1**
+Current development version: **v0.4.2**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

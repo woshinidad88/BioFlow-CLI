@@ -139,6 +139,9 @@ bioflow align --ref ref.fa --input reads.fastq --output aligned.bam --threads 4
 # 运行 BLAST 核酸检索
 bioflow search --db ref.fa --query query.fa --output hits.tsv --evalue 1e-5 --max-target-seqs 20
 
+# 仅展示前 3 个摘要命中
+bioflow search --db ref.fa --query query.fa --output hits.tsv --top 3
+
 # 列出生物工具安装状态
 bioflow env --list
 
@@ -164,6 +167,12 @@ bioflow --json batch -i ./data -o ./formatted
 - **stdout**：结果数据和 JSON 输出（用于管道传输）
 - **stderr**：进度消息、警告和错误信息
 
+#### 检索结果摘要
+
+- `bioflow search --top N` 可控制摘要展示的 Top hits 数量
+- JSON 模式现包含 `summary.best_hit`、`summary.top_hits` 和聚合统计字段
+- 原始 BLAST tabular 结果仍会写入 TSV 输出文件
+
 #### 批量并发
 
 - `bioflow batch --workers N` 可启用多进程批量格式化
@@ -188,7 +197,7 @@ pip install -e .
 
 ## 项目状态
 
-当前开发版本：**v0.4.1**
+当前开发版本：**v0.4.2**
 
 ## 许可证
 

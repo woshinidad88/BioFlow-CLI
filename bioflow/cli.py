@@ -457,6 +457,7 @@ def cmd_search(args: argparse.Namespace) -> int:
     query_path = Path(args.query)
     evalue = args.evalue
     max_target_seqs = args.max_target_seqs
+    top_n = args.top
 
     if not db_path.exists():
         if args.json:
@@ -494,6 +495,13 @@ def cmd_search(args: argparse.Namespace) -> int:
             )
         return EXIT_ARGUMENT_ERROR
 
+    if top_n <= 0:
+        if args.json:
+            print(json.dumps({"error": "invalid_top", "top": top_n}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: top must be positive (got {top_n})", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
     output_path = Path(args.output) if args.output else None
 
     try:
@@ -503,12 +511,17 @@ def cmd_search(args: argparse.Namespace) -> int:
             output=output_path,
             evalue=evalue,
             max_target_seqs=max_target_seqs,
+            top_n=top_n,
             cli_mode=True,
         )
         if result is None:
             return EXIT_RUNTIME_ERROR
         if args.json:
             print(json.dumps({"status": "success", **result}, ensure_ascii=False))
+        elif not args.quiet:
+            from bioflow.search import display_search_summary
+
+            display_search_summary(result["summary"])
         return EXIT_SUCCESS
     except PreflightError as exc:
         if args.json:
@@ -583,6 +596,7 @@ def main() -> int:
         default=10,
         help="Maximum target sequences per query (default: 10)",
     )
+    parser_search.add_argument("--top", type=int, default=5, help="Number of top hits to summarize (default: 5)")
 
     args = parser.parse_args()
 

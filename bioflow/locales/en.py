@@ -74,6 +74,7 @@ STRINGS = {
     "search_output_prompt": "Enter output TSV path:",
     "search_evalue_prompt": "E-value threshold (default 10.0):",
     "search_max_targets_prompt": "Maximum target sequences (default 10):",
+    "search_top_n_prompt": "Top hits to display (default 5):",
     "search_pipeline_start": "Starting BLAST search for: {file}",
     "search_pipeline_done": "BLAST search completed! Output: {output} | Hits: {hits}",
     "search_step_failed": "Search step failed ({step}): {err}",
@@ -82,6 +83,15 @@ STRINGS = {
     "search_db_cached": "[Step 1/2] makeblastdb (cached)",
     "search_step_makeblastdb": "[Step 1/2] makeblastdb",
     "search_step_blastn": "[Step 2/2] blastn",
+    "search_summary_line": "Search summary: {hits} hits",
+    "search_best_hit_line": "Best hit: {subject} | Identity={identity}% | E-value={evalue} | Bitscore={bitscore}",
+    "search_no_hits": "No hits found.",
+    "search_top_hits_title": "Top Hits",
+    "search_col_query": "Query",
+    "search_col_subject": "Subject",
+    "search_col_identity": "Identity",
+    "search_col_evalue": "E-value",
+    "search_col_bitscore": "Bitscore",
 
     # === General ===
     "confirm_exit": "Are you sure you want to exit?",

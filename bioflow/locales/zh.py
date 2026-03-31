@@ -74,6 +74,7 @@ STRINGS = {
     "search_output_prompt": "请输入输出 TSV 路径：",
     "search_evalue_prompt": "E-value 阈值（默认 10.0）：",
     "search_max_targets_prompt": "最大目标序列数（默认 10）：",
+    "search_top_n_prompt": "展示前 N 个命中（默认 5）：",
     "search_pipeline_start": "开始 BLAST 检索：{file}",
     "search_pipeline_done": "BLAST 检索完成！输出：{output} | 命中数：{hits}",
     "search_step_failed": "检索步骤失败（{step}）：{err}",
@@ -82,6 +83,15 @@ STRINGS = {
     "search_db_cached": "[步骤 1/2] makeblastdb（已缓存）",
     "search_step_makeblastdb": "[步骤 1/2] makeblastdb",
     "search_step_blastn": "[步骤 2/2] blastn",
+    "search_summary_line": "检索摘要：共 {hits} 个命中",
+    "search_best_hit_line": "最佳命中：{subject} | Identity={identity}% | E-value={evalue} | Bitscore={bitscore}",
+    "search_no_hits": "未发现命中结果。",
+    "search_top_hits_title": "Top Hits",
+    "search_col_query": "Query",
+    "search_col_subject": "Subject",
+    "search_col_identity": "Identity",
+    "search_col_evalue": "E-value",
+    "search_col_bitscore": "Bitscore",
 
     # === 通用 ===
     "confirm_exit": "确定要退出吗？",
