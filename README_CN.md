@@ -29,6 +29,7 @@ BioFlow-CLI 是一个基于 **MIT 许可证** 发布的 **开源项目**。
 - **序列比对** — 集成 BWA + SAMtools 完整流程，支持建索引、比对、排序、BAM 索引与比对统计
 - **BLAST 检索** — 集成 `makeblastdb` + `blastn` 基础核酸检索流程，输出标准 tabular 结果
 - **QC 流程** — 集成 FastQC + Trimmomatic 的质量控制流水线
+- **YAML 工作流配置** — 可通过配置文件复用 QC / 比对 / 检索参数
 
 ## 快速开始
 
@@ -133,14 +134,23 @@ bioflow batch -i ./data -o ./formatted -p "*.fastq" -r --workers 4
 # 运行 QC 流程
 bioflow qc --input reads.fastq --output qc_results/ --adapter adapters.fa --minlen 36
 
+# 从配置文件运行 QC 流程
+bioflow qc --config examples/qc.yml
+
 # 运行序列比对流程
 bioflow align --ref ref.fa --input reads.fastq --output aligned.bam --threads 4
+
+# 从配置文件运行序列比对流程
+bioflow align --config examples/align.yml
 
 # 运行 BLAST 核酸检索
 bioflow search --db ref.fa --query query.fa --output hits.tsv --evalue 1e-5 --max-target-seqs 20
 
 # 仅展示前 3 个摘要命中
 bioflow search --db ref.fa --query query.fa --output hits.tsv --top 3
+
+# 从配置文件运行 BLAST 检索
+bioflow search --config examples/search.yml
 
 # 列出生物工具安装状态
 bioflow env --list
@@ -173,6 +183,14 @@ bioflow --json batch -i ./data -o ./formatted
 - JSON 模式现包含 `summary.best_hit`、`summary.top_hits` 和聚合统计字段
 - 原始 BLAST tabular 结果仍会写入 TSV 输出文件
 
+#### YAML 工作流配置
+
+- `bioflow qc --config qc.yml`
+- `bioflow align --config align.yml`
+- `bioflow search --config search.yml`
+- 参数优先级为：CLI 显式参数 > YAML 配置 > 内置默认值
+- 示例模板已放在 `examples/`
+
 #### 批量并发
 
 - `bioflow batch --workers N` 可启用多进程批量格式化
@@ -197,7 +215,7 @@ pip install -e .
 
 ## 项目状态
 
-当前开发版本：**v0.4.2**
+当前开发版本：**v0.4.3**
 
 ## 许可证
 

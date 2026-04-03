@@ -21,6 +21,7 @@ from bioflow.bio_tasks import (
 )
 from bioflow.env_manager import BIO_TOOLS, _check_conda, _check_installed
 from bioflow.alignment import run_alignment_pipeline
+from bioflow.config import ConfigError, load_workflow_config
 from bioflow.i18n import init_language, t
 from bioflow.pipeline import run_qc_pipeline
 from bioflow.preflight import PreflightError
@@ -53,6 +54,36 @@ def _setup_logging(quiet: bool = False) -> None:
         handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
         root.addHandler(handler)
         root.setLevel(logging.ERROR if quiet else logging.WARNING)
+
+
+def _resolve_config_path(config_value: str | None) -> Path | None:
+    """将 CLI 传入的配置路径转换为 Path。"""
+    if not config_value:
+        return None
+    return Path(config_value)
+
+
+def _merge_workflow_args(
+    args: argparse.Namespace,
+    workflow: str,
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    """按 CLI > config > default 合并工作流参数。"""
+    merged = dict(defaults)
+    config_path = _resolve_config_path(getattr(args, "config", None))
+    if config_path is not None:
+        config_data = load_workflow_config(config_path, workflow)
+        merged.update(config_data)
+
+    for key in defaults:
+        if hasattr(args, key):
+            value = getattr(args, key)
+            if value is not None:
+                merged[key] = value
+
+    if config_path is not None:
+        merged["config"] = str(config_path)
+    return merged
 
 
 def cmd_seq(args: argparse.Namespace) -> int:
@@ -330,8 +361,28 @@ def cmd_env_install(args: argparse.Namespace) -> int:
 
 def cmd_qc(args: argparse.Namespace) -> int:
     """处理 qc 子命令：质控流程。"""
-    input_path = Path(args.input)
     quiet = args.quiet or args.json
+    try:
+        params = _merge_workflow_args(
+            args,
+            "qc",
+            {"input": None, "output": None, "adapter": None, "minlen": 36},
+        )
+    except ConfigError as exc:
+        if args.json:
+            print(json.dumps({"error": "config_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: {exc}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if not params["input"]:
+        if args.json:
+            print(json.dumps({"error": "missing_required", "field": "input"}, ensure_ascii=False))
+        else:
+            console_err.print("Error: input is required (CLI or config)", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    input_path = Path(str(params["input"]))
 
     if not input_path.exists():
         if args.json:
@@ -340,9 +391,9 @@ def cmd_qc(args: argparse.Namespace) -> int:
             console_err.print(t("seq_file_not_found", path=str(input_path)), style="bold red")
         return EXIT_ARGUMENT_ERROR
 
-    output_dir = Path(args.output) if args.output else None
-    adapter = args.adapter if args.adapter else None
-    minlen = args.minlen
+    output_dir = Path(str(params["output"])) if params["output"] else None
+    adapter = str(params["adapter"]) if params["adapter"] else None
+    minlen = int(params["minlen"])
 
     if minlen <= 0:
         if args.json:
@@ -384,10 +435,31 @@ def cmd_qc(args: argparse.Namespace) -> int:
 
 def cmd_align(args: argparse.Namespace) -> int:
     """处理 align 子命令：序列比对流程。"""
-    ref_path = Path(args.ref)
-    input_path = Path(args.input)
     quiet = args.quiet or args.json
-    threads = args.threads
+    try:
+        params = _merge_workflow_args(
+            args,
+            "align",
+            {"ref": None, "input": None, "output": None, "threads": 1},
+        )
+    except ConfigError as exc:
+        if args.json:
+            print(json.dumps({"error": "config_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: {exc}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if not params["ref"] or not params["input"]:
+        missing = "ref" if not params["ref"] else "input"
+        if args.json:
+            print(json.dumps({"error": "missing_required", "field": missing}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: {missing} is required (CLI or config)", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    ref_path = Path(str(params["ref"]))
+    input_path = Path(str(params["input"]))
+    threads = int(params["threads"])
 
     # 参数校验
     if not ref_path.exists():
@@ -411,7 +483,7 @@ def cmd_align(args: argparse.Namespace) -> int:
             console_err.print(f"Error: threads must be positive (got {threads})", style="bold red")
         return EXIT_ARGUMENT_ERROR
 
-    output_path = Path(args.output) if args.output else None
+    output_path = Path(str(params["output"])) if params["output"] else None
 
     try:
         stats = run_alignment_pipeline(
@@ -453,11 +525,39 @@ def cmd_align(args: argparse.Namespace) -> int:
 
 def cmd_search(args: argparse.Namespace) -> int:
     """处理 search 子命令：BLAST 检索流程。"""
-    db_path = Path(args.db)
-    query_path = Path(args.query)
-    evalue = args.evalue
-    max_target_seqs = args.max_target_seqs
-    top_n = args.top
+    try:
+        params = _merge_workflow_args(
+            args,
+            "search",
+            {
+                "db": None,
+                "query": None,
+                "output": None,
+                "evalue": 10.0,
+                "max_target_seqs": 10,
+                "top": 5,
+            },
+        )
+    except ConfigError as exc:
+        if args.json:
+            print(json.dumps({"error": "config_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: {exc}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    if not params["db"] or not params["query"]:
+        missing = "db" if not params["db"] else "query"
+        if args.json:
+            print(json.dumps({"error": "missing_required", "field": missing}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: {missing} is required (CLI or config)", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    db_path = Path(str(params["db"]))
+    query_path = Path(str(params["query"]))
+    evalue = float(params["evalue"])
+    max_target_seqs = int(params["max_target_seqs"])
+    top_n = int(params["top"])
 
     if not db_path.exists():
         if args.json:
@@ -502,7 +602,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             console_err.print(f"Error: top must be positive (got {top_n})", style="bold red")
         return EXIT_ARGUMENT_ERROR
 
-    output_path = Path(args.output) if args.output else None
+    output_path = Path(str(params["output"])) if params["output"] else None
 
     try:
         result = run_blast_search(
@@ -562,10 +662,11 @@ def main() -> int:
 
     # qc 子命令
     parser_qc = subparsers.add_parser("qc", help="Run QC pipeline (FastQC + Trimmomatic)")
-    parser_qc.add_argument("--input", "-i", required=True, help="Input FASTQ file")
+    parser_qc.add_argument("--config", help="YAML config file for qc workflow")
+    parser_qc.add_argument("--input", "-i", help="Input FASTQ file")
     parser_qc.add_argument("--output", "-o", help="Output directory (default: qc_output/)")
     parser_qc.add_argument("--adapter", "-a", help="Adapter file for Trimmomatic")
-    parser_qc.add_argument("--minlen", type=int, default=36, help="Minimum read length (default: 36)")
+    parser_qc.add_argument("--minlen", type=int, help="Minimum read length (default: 36)")
 
     # batch 子命令
     parser_batch = subparsers.add_parser("batch", help="Batch format multiple sequence files")
@@ -579,24 +680,25 @@ def main() -> int:
 
     # align 子命令
     parser_align = subparsers.add_parser("align", help="Run alignment pipeline (BWA + SAMtools)")
-    parser_align.add_argument("--ref", "-r", required=True, help="Reference genome FASTA file")
-    parser_align.add_argument("--input", "-i", required=True, help="Input reads file (FASTQ)")
+    parser_align.add_argument("--config", help="YAML config file for alignment workflow")
+    parser_align.add_argument("--ref", "-r", help="Reference genome FASTA file")
+    parser_align.add_argument("--input", "-i", help="Input reads file (FASTQ)")
     parser_align.add_argument("--output", "-o", help="Output BAM file (default: input.sorted.bam)")
-    parser_align.add_argument("--threads", "-t", type=int, default=1, help="Number of threads (default: 1)")
+    parser_align.add_argument("--threads", "-t", type=int, help="Number of threads (default: 1)")
 
     # search 子命令
     parser_search = subparsers.add_parser("search", help="Run BLAST nucleotide search")
-    parser_search.add_argument("--db", required=True, help="Reference database FASTA file")
-    parser_search.add_argument("--query", "-q", required=True, help="Query FASTA file")
+    parser_search.add_argument("--config", help="YAML config file for search workflow")
+    parser_search.add_argument("--db", help="Reference database FASTA file")
+    parser_search.add_argument("--query", "-q", help="Query FASTA file")
     parser_search.add_argument("--output", "-o", help="Output TSV file (default: query.blast.tsv)")
-    parser_search.add_argument("--evalue", type=float, default=10.0, help="E-value threshold (default: 10.0)")
+    parser_search.add_argument("--evalue", type=float, help="E-value threshold (default: 10.0)")
     parser_search.add_argument(
         "--max-target-seqs",
         type=int,
-        default=10,
         help="Maximum target sequences per query (default: 10)",
     )
-    parser_search.add_argument("--top", type=int, default=5, help="Number of top hits to summarize (default: 5)")
+    parser_search.add_argument("--top", type=int, help="Number of top hits to summarize (default: 5)")
 
     args = parser.parse_args()
 

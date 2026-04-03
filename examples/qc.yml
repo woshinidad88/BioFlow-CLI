@@ -1,0 +1,5 @@
+qc:
+  input: reads.fastq
+  output: qc_results
+  adapter: adapters.fa
+  minlen: 36

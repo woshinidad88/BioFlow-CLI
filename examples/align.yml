@@ -1,0 +1,5 @@
+align:
+  ref: ref.fa
+  input: reads.fastq
+  output: aligned.sorted.bam
+  threads: 4

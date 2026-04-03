@@ -34,6 +34,7 @@ License text: [MIT License](LICENSE)
   - `makeblastdb` + `blastn` nucleotide search workflow
   - Tabular result output (`outfmt 6`) for downstream analysis
 - **QC Pipeline**: Integrated FastQC + Trimmomatic workflow
+- **YAML Workflow Config**: run QC / alignment / search from reusable config files
 - **Structured Output**: `--json` output for automation pipelines
 - **Stable Exit Codes**: standardized success/error/dependency signaling
 
@@ -94,14 +95,23 @@ bioflow batch -i ./data -o ./formatted -p "*.fastq" -r --workers 4
 # Run QC pipeline
 bioflow qc --input reads.fastq --output qc_results/ --adapter adapters.fa --minlen 36
 
+# Run QC pipeline from config
+bioflow qc --config examples/qc.yml
+
 # Run alignment pipeline
 bioflow align --ref ref.fa --input reads.fastq --output aligned.bam --threads 4
+
+# Run alignment pipeline from config
+bioflow align --config examples/align.yml
 
 # Run BLAST nucleotide search
 bioflow search --db ref.fa --query query.fa --output hits.tsv --evalue 1e-5 --max-target-seqs 20
 
 # Show only top 3 summarized hits
 bioflow search --db ref.fa --query query.fa --output hits.tsv --top 3
+
+# Run BLAST search from config
+bioflow search --config examples/search.yml
 
 # List tool status
 bioflow env --list
@@ -136,6 +146,14 @@ bioflow --json batch -i ./data -o ./formatted
 - JSON mode now includes `summary.best_hit`, `summary.top_hits`, and aggregate hit statistics
 - Raw BLAST tabular output is still written to the TSV file
 
+### YAML Workflow Config
+
+- `bioflow qc --config qc.yml`
+- `bioflow align --config align.yml`
+- `bioflow search --config search.yml`
+- parameter precedence is: explicit CLI argument > YAML config > built-in default
+- example templates are available in `examples/`
+
 ### Batch Concurrency
 
 - `bioflow batch --workers N` enables multi-process batch formatting
@@ -160,7 +178,7 @@ pip install -e .
 
 ## Project Status
 
-Current development version: **v0.4.2**
+Current development version: **v0.4.3**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 
