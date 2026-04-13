@@ -23,6 +23,13 @@ class RunLayout:
     stdout_log: Path
 
 
+STEP_PENDING = "pending"
+STEP_RUNNING = "running"
+STEP_SUCCESS = "success"
+STEP_FAILED = "failed"
+STEP_SKIPPED = "skipped"
+
+
 def utc_now_iso() -> str:
     """返回 UTC ISO8601 时间字符串。"""
     return datetime.now(timezone.utc).isoformat()
@@ -79,6 +86,57 @@ def append_log(path: Path | None, text: str) -> None:
         handle.write(text)
         if not text.endswith("\n"):
             handle.write("\n")
+
+
+def read_metadata(layout: RunLayout) -> dict[str, Any]:
+    """读取 metadata.json，不存在或损坏时返回空字典。"""
+    if not layout.metadata_path.exists():
+        return {}
+    try:
+        return json.loads(layout.metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def init_steps(step_names: list[str], existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    """初始化步骤状态字典。"""
+    steps: dict[str, Any] = {}
+    existing_steps = existing if isinstance(existing, dict) else {}
+    for step_name in step_names:
+        step_payload = existing_steps.get(step_name)
+        steps[step_name] = dict(step_payload) if isinstance(step_payload, dict) else {"status": STEP_PENDING}
+    return steps
+
+
+def set_step_state(
+    steps: dict[str, Any],
+    step_name: str,
+    status: str,
+    *,
+    outputs: dict[str, Any] | None = None,
+    note: str | None = None,
+) -> None:
+    """更新单个步骤状态。"""
+    now = utc_now_iso()
+    step = dict(steps.get(step_name, {}))
+    step["status"] = status
+    step.setdefault("started_at", now)
+    if status == STEP_RUNNING:
+        step["started_at"] = now
+        step.pop("completed_at", None)
+    else:
+        step["completed_at"] = now
+    if outputs:
+        step["outputs"] = outputs
+    if note:
+        step["note"] = note
+    steps[step_name] = step
+
+
+def step_succeeded(steps: dict[str, Any], step_name: str) -> bool:
+    """判断步骤在 metadata 中是否标记为成功。"""
+    step = steps.get(step_name)
+    return isinstance(step, dict) and step.get("status") in {STEP_SUCCESS, STEP_SKIPPED}
 
 
 def write_metadata(

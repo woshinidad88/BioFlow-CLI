@@ -15,9 +15,17 @@ from rich.table import Table
 from bioflow.i18n import t
 from bioflow.preflight import preflight_check
 from bioflow.run_layout import (
+    STEP_FAILED,
+    STEP_RUNNING,
+    STEP_SKIPPED,
+    STEP_SUCCESS,
     append_log,
     create_run_layout,
+    init_steps,
+    read_metadata,
     resolve_result_path,
+    set_step_state,
+    step_succeeded,
     utc_now_iso,
     write_metadata,
 )
@@ -25,6 +33,9 @@ from bioflow.run_layout import (
 console = Console()
 
 SEARCH_REQUIRED_TOOLS = ("makeblastdb", "blastn")
+SEARCH_STEP_DB = "makeblastdb"
+SEARCH_STEP_BLASTN = "blastn"
+SEARCH_STEP_SUMMARY = "summary"
 BLAST_OUTFMT6_COLUMNS = (
     "query_id",
     "subject_id",
@@ -193,6 +204,22 @@ def parse_blast_tsv(output_path: Path) -> list[BlastHit]:
     return hits
 
 
+def _is_nonempty_file(path: Path) -> bool:
+    """文件存在且非空。"""
+    return path.is_file() and path.stat().st_size > 0
+
+
+def _summary_ready(path: Path) -> bool:
+    """summary JSON 存在且结构基本有效。"""
+    if not _is_nonempty_file(path):
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and "hit_count" in payload
+
+
 def _rank_hits(hits: list[BlastHit]) -> list[BlastHit]:
     """按 evalue / bitscore / identity 排序。"""
     return sorted(
@@ -227,6 +254,9 @@ def display_search_summary(summary: dict[str, object]) -> None:
 
     best_hit = summary["best_hit"]
     if not isinstance(best_hit, dict):
+        console.print(t("search_no_hits"), style="yellow")
+        return
+    if not all(key in best_hit for key in ("subject_id", "identity", "evalue", "bitscore")):
         console.print(t("search_no_hits"), style="yellow")
         return
 
@@ -273,6 +303,7 @@ def run_blast_search(
     evalue: float = 10.0,
     max_target_seqs: int = 10,
     top_n: int = 5,
+    resume: bool = False,
     cli_mode: bool = False,
     skip_preflight: bool = False,
 ) -> dict[str, object] | None:
@@ -284,15 +315,30 @@ def run_blast_search(
     layout = create_run_layout("search", query_fasta, outdir=outdir)
     started_at = utc_now_iso()
     output = resolve_result_path(layout, output, f"{query_fasta.stem}.blast.tsv")
-    write_metadata(
-        layout,
-        status="running",
-        command="search",
-        parameters={"evalue": evalue, "max_target_seqs": max_target_seqs, "top_n": top_n},
-        inputs={"db": str(db_fasta), "query": str(query_fasta)},
-        outputs={"root": str(layout.root), "tsv": str(output)},
-        started_at=started_at,
+    summary_path = layout.results_dir / "search_summary.json"
+    existing_metadata = read_metadata(layout)
+    steps = init_steps(
+        [SEARCH_STEP_DB, SEARCH_STEP_BLASTN, SEARCH_STEP_SUMMARY],
+        existing_metadata.get("steps"),
     )
+
+    def persist(status: str, *, completed_at: str | None = None, summary: dict[str, object] | None = None) -> None:
+        extra: dict[str, object] = {"steps": steps, "resume_used": resume}
+        if summary is not None:
+            extra["summary"] = summary
+        write_metadata(
+            layout,
+            status=status,
+            command="search",
+            parameters={"evalue": evalue, "max_target_seqs": max_target_seqs, "top_n": top_n, "resume": resume},
+            inputs={"db": str(db_fasta), "query": str(query_fasta)},
+            outputs={"root": str(layout.root), "tsv": str(output), "summary": str(summary_path)},
+            started_at=started_at,
+            completed_at=completed_at,
+            extra=extra,
+        )
+
+    persist("running")
 
     quiet = cli_mode
     if not quiet:
@@ -303,59 +349,92 @@ def run_blast_search(
             )
         )
 
-    if _blast_db_ready(db_fasta):
+    if resume and step_succeeded(steps, SEARCH_STEP_DB) and _blast_db_ready(db_fasta):
+        set_step_state(steps, SEARCH_STEP_DB, STEP_SKIPPED, outputs={"db": str(db_fasta)}, note="reused existing output")
+        persist("running")
+        if not quiet:
+            console.print(t("search_db_cached"), style="bold blue")
+    elif _blast_db_ready(db_fasta):
+        set_step_state(steps, SEARCH_STEP_DB, STEP_SUCCESS, outputs={"db": str(db_fasta)})
+        persist("running")
         if not quiet:
             console.print(t("search_db_cached"), style="bold blue")
     else:
         if not quiet:
             console.print(t("search_step_makeblastdb"), style="bold blue")
+        set_step_state(steps, SEARCH_STEP_DB, STEP_RUNNING)
+        persist("running")
         if not _run_makeblastdb(
             db_fasta,
             quiet=quiet,
             stdout_log=layout.stdout_log,
             stderr_log=layout.stderr_log,
         ):
-            write_metadata(
-                layout,
-                status="failed",
-                command="search",
-                parameters={"evalue": evalue, "max_target_seqs": max_target_seqs, "top_n": top_n},
-                inputs={"db": str(db_fasta), "query": str(query_fasta)},
-                outputs={"root": str(layout.root), "tsv": str(output)},
-                started_at=started_at,
-                completed_at=utc_now_iso(),
-            )
+            set_step_state(steps, SEARCH_STEP_DB, STEP_FAILED, outputs={"db": str(db_fasta)})
+            persist("failed", completed_at=utc_now_iso())
             return None
+        set_step_state(steps, SEARCH_STEP_DB, STEP_SUCCESS, outputs={"db": str(db_fasta)})
+        persist("running")
 
     if not quiet:
         console.print(t("search_step_blastn"), style="bold blue")
-    if not _run_blastn(
-        db_fasta,
-        query_fasta,
-        output,
-        evalue=evalue,
-        max_target_seqs=max_target_seqs,
-        quiet=quiet,
-        stdout_log=layout.stdout_log,
-        stderr_log=layout.stderr_log,
-    ):
-        write_metadata(
-            layout,
-            status="failed",
-            command="search",
-            parameters={"evalue": evalue, "max_target_seqs": max_target_seqs, "top_n": top_n},
-            inputs={"db": str(db_fasta), "query": str(query_fasta)},
-            outputs={"root": str(layout.root), "tsv": str(output)},
-            started_at=started_at,
-            completed_at=utc_now_iso(),
-        )
-        return None
+    if resume and step_succeeded(steps, SEARCH_STEP_BLASTN) and _is_nonempty_file(output):
+        try:
+            hits = parse_blast_tsv(output)
+        except ValueError:
+            hits = None
+        if hits is not None:
+            set_step_state(steps, SEARCH_STEP_BLASTN, STEP_SKIPPED, outputs={"tsv": str(output)}, note="reused existing output")
+            persist("running")
+        else:
+            set_step_state(steps, SEARCH_STEP_BLASTN, STEP_RUNNING)
+            persist("running")
+            if not _run_blastn(
+                db_fasta,
+                query_fasta,
+                output,
+                evalue=evalue,
+                max_target_seqs=max_target_seqs,
+                quiet=quiet,
+                stdout_log=layout.stdout_log,
+                stderr_log=layout.stderr_log,
+            ):
+                set_step_state(steps, SEARCH_STEP_BLASTN, STEP_FAILED, outputs={"tsv": str(output)})
+                persist("failed", completed_at=utc_now_iso())
+                return None
+            hits = parse_blast_tsv(output)
+            set_step_state(steps, SEARCH_STEP_BLASTN, STEP_SUCCESS, outputs={"tsv": str(output)})
+            persist("running")
+    else:
+        set_step_state(steps, SEARCH_STEP_BLASTN, STEP_RUNNING)
+        persist("running")
+        if not _run_blastn(
+            db_fasta,
+            query_fasta,
+            output,
+            evalue=evalue,
+            max_target_seqs=max_target_seqs,
+            quiet=quiet,
+            stdout_log=layout.stdout_log,
+            stderr_log=layout.stderr_log,
+        ):
+            set_step_state(steps, SEARCH_STEP_BLASTN, STEP_FAILED, outputs={"tsv": str(output)})
+            persist("failed", completed_at=utc_now_iso())
+            return None
+        hits = parse_blast_tsv(output)
+        set_step_state(steps, SEARCH_STEP_BLASTN, STEP_SUCCESS, outputs={"tsv": str(output)})
+        persist("running")
 
-    hits = parse_blast_tsv(output)
-    summary = summarize_blast_hits(hits, top_n=top_n)
+    if resume and step_succeeded(steps, SEARCH_STEP_SUMMARY) and _summary_ready(summary_path):
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        set_step_state(steps, SEARCH_STEP_SUMMARY, STEP_SKIPPED, outputs={"summary": str(summary_path)}, note="reused existing output")
+        persist("running", summary=summary)
+    else:
+        summary = summarize_blast_hits(hits, top_n=top_n)
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        set_step_state(steps, SEARCH_STEP_SUMMARY, STEP_SUCCESS, outputs={"summary": str(summary_path)})
+        persist("running", summary=summary)
     hit_count = int(summary["hit_count"])
-    summary_path = layout.results_dir / "search_summary.json"
-    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     if not quiet:
         console.print(
             t("search_pipeline_done", output=str(output), hits=hit_count),
@@ -363,17 +442,7 @@ def run_blast_search(
         )
         display_search_summary(summary)
 
-    write_metadata(
-        layout,
-        status="success",
-        command="search",
-        parameters={"evalue": evalue, "max_target_seqs": max_target_seqs, "top_n": top_n},
-        inputs={"db": str(db_fasta), "query": str(query_fasta)},
-        outputs={"root": str(layout.root), "tsv": str(output), "summary": str(summary_path)},
-        started_at=started_at,
-        completed_at=utc_now_iso(),
-        extra={"summary": summary},
-    )
+    persist("success", completed_at=utc_now_iso(), summary=summary)
 
     return {
         "db": str(db_fasta),
@@ -384,6 +453,7 @@ def run_blast_search(
         "evalue": evalue,
         "max_target_seqs": max_target_seqs,
         "top_n": top_n,
+        "resume_used": resume,
         "summary": summary,
     }
 
@@ -452,6 +522,21 @@ def search_menu() -> None:
         return
     if not output_path:
         return
+    resume = False
+    run_root = query_fasta.parent / "search_run"
+    output_candidate = Path(output_path)
+    if output_candidate.parent.name == "results":
+        run_root = output_candidate.parent.parent
+    if (run_root / "metadata.json").exists():
+        try:
+            resume = bool(
+                questionary.confirm(
+                    t("resume_detected_prompt", path=str(run_root)),
+                    default=True,
+                ).ask()
+            )
+        except KeyboardInterrupt:
+            return
 
     evalue = _parse_float(questionary.text(t("search_evalue_prompt"), default="10.0").ask(), 10.0)
     max_target_seqs = _parse_int(
@@ -467,9 +552,11 @@ def search_menu() -> None:
         db_fasta,
         query_fasta,
         output=Path(output_path),
+        outdir=run_root,
         evalue=evalue,
         max_target_seqs=max_target_seqs,
         top_n=top_n,
+        resume=resume,
         cli_mode=False,
         skip_preflight=True,
     )

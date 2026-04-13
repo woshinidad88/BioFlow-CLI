@@ -137,11 +137,17 @@ bioflow qc --input reads.fastq --outdir runs/qc-001 --adapter adapters.fa --minl
 # 从配置文件运行 QC 流程
 bioflow qc --config examples/qc.yml
 
+# 恢复中断的 QC 流程
+bioflow qc --input reads.fastq --outdir runs/qc-001 --resume
+
 # 运行序列比对流程
 bioflow align --ref ref.fa --input reads.fastq --outdir runs/align-001 --output aligned.bam --threads 4
 
 # 从配置文件运行序列比对流程
 bioflow align --config examples/align.yml
+
+# 恢复中断的比对流程
+bioflow align --ref ref.fa --input reads.fastq --outdir runs/align-001 --resume
 
 # 运行 BLAST 核酸检索
 bioflow search --db ref.fa --query query.fa --outdir runs/search-001 --output hits.tsv --evalue 1e-5 --max-target-seqs 20
@@ -151,6 +157,9 @@ bioflow search --db ref.fa --query query.fa --output hits.tsv --top 3
 
 # 从配置文件运行 BLAST 检索
 bioflow search --config examples/search.yml
+
+# 恢复中断的 BLAST 检索
+bioflow search --db ref.fa --query query.fa --outdir runs/search-001 --resume
 
 # 列出生物工具安装状态
 bioflow env --list
@@ -198,6 +207,13 @@ bioflow --json batch -i ./data -o ./formatted
 - 每次运行都会生成 `logs/`、`results/`、`tmp/` 和 `metadata.json`
 - 若运行失败，诊断日志会保留在 `logs/` 目录中，便于排错
 
+#### 恢复执行与检查点
+
+- `bioflow qc --resume`、`bioflow align --resume`、`bioflow search --resume` 可从最近一次有效检查点恢复执行
+- 已完成且输出有效的步骤会自动复用
+- 缺失或损坏的中间结果会被识别并重新计算
+- TUI 模式下检测到可恢复运行目录时会给出恢复提示
+
 #### 批量并发
 
 - `bioflow batch --workers N` 可启用多进程批量格式化
@@ -222,7 +238,7 @@ pip install -e .
 
 ## 项目状态
 
-当前开发版本：**v0.5.0**
+当前开发版本：**v0.5.1**
 
 ## 许可证
 

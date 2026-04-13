@@ -380,7 +380,7 @@ def cmd_qc(args: argparse.Namespace) -> int:
         params = _merge_workflow_args(
             args,
             "qc",
-            {"input": None, "output": None, "outdir": None, "adapter": None, "minlen": 36},
+            {"input": None, "output": None, "outdir": None, "adapter": None, "minlen": 36, "resume": False},
         )
     except ConfigError as exc:
         if args.json:
@@ -409,6 +409,7 @@ def cmd_qc(args: argparse.Namespace) -> int:
     outdir = Path(str(params["outdir"])) if params["outdir"] else None
     adapter = str(params["adapter"]) if params["adapter"] else None
     minlen = int(params["minlen"])
+    resume = bool(params["resume"])
 
     if minlen <= 0:
         if args.json:
@@ -424,6 +425,7 @@ def cmd_qc(args: argparse.Namespace) -> int:
             outdir=outdir,
             adapter=adapter,
             minlen=minlen,
+            resume=resume,
             cli_mode=True,
         )
         if success:
@@ -435,6 +437,7 @@ def cmd_qc(args: argparse.Namespace) -> int:
                     "outdir": final_outdir,
                     "output": str(Path(final_outdir) / "results"),
                     "metadata": str(Path(final_outdir) / "metadata.json"),
+                    "resume_used": resume,
                 }
                 print(json.dumps(payload, ensure_ascii=False))
             return EXIT_SUCCESS
@@ -459,7 +462,7 @@ def cmd_align(args: argparse.Namespace) -> int:
         params = _merge_workflow_args(
             args,
             "align",
-            {"ref": None, "input": None, "output": None, "outdir": None, "threads": 1},
+            {"ref": None, "input": None, "output": None, "outdir": None, "threads": 1, "resume": False},
         )
     except ConfigError as exc:
         if args.json:
@@ -479,6 +482,7 @@ def cmd_align(args: argparse.Namespace) -> int:
     ref_path = Path(str(params["ref"]))
     input_path = Path(str(params["input"]))
     threads = int(params["threads"])
+    resume = bool(params["resume"])
 
     # 参数校验
     if not ref_path.exists():
@@ -512,6 +516,7 @@ def cmd_align(args: argparse.Namespace) -> int:
             output=output_path,
             outdir=outdir,
             threads=threads,
+            resume=resume,
             cli_mode=True,
         )
         if stats is not None:
@@ -523,6 +528,7 @@ def cmd_align(args: argparse.Namespace) -> int:
                     "output": str(_resolve_align_json_output(input_path, output_path, outdir)),
                     "outdir": str(outdir or _default_workflow_outdir("align", input_path)),
                     "metadata": str((outdir or _default_workflow_outdir("align", input_path)) / "metadata.json"),
+                    "resume_used": resume,
                     "stats": {
                         "total": stats["total"],
                         "mapped": stats["mapped"],
@@ -560,6 +566,7 @@ def cmd_search(args: argparse.Namespace) -> int:
                 "evalue": 10.0,
                 "max_target_seqs": 10,
                 "top": 5,
+                "resume": False,
             },
         )
     except ConfigError as exc:
@@ -582,6 +589,7 @@ def cmd_search(args: argparse.Namespace) -> int:
     evalue = float(params["evalue"])
     max_target_seqs = int(params["max_target_seqs"])
     top_n = int(params["top"])
+    resume = bool(params["resume"])
 
     if not db_path.exists():
         if args.json:
@@ -638,6 +646,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             evalue=evalue,
             max_target_seqs=max_target_seqs,
             top_n=top_n,
+            resume=resume,
             cli_mode=True,
         )
         if result is None:
@@ -692,6 +701,7 @@ def main() -> int:
     parser_qc.add_argument("--input", "-i", help="Input FASTQ file")
     parser_qc.add_argument("--output", "-o", help="Legacy run root directory (same effect as --outdir)")
     parser_qc.add_argument("--outdir", help="Run output root directory (default: input_dir/qc_run)")
+    parser_qc.add_argument("--resume", action="store_true", help="Resume from the latest valid QC checkpoint")
     parser_qc.add_argument("--adapter", "-a", help="Adapter file for Trimmomatic")
     parser_qc.add_argument("--minlen", type=int, help="Minimum read length (default: 36)")
 
@@ -712,6 +722,7 @@ def main() -> int:
     parser_align.add_argument("--input", "-i", help="Input reads file (FASTQ)")
     parser_align.add_argument("--output", "-o", help="Output BAM file written under results/ unless absolute path is given")
     parser_align.add_argument("--outdir", help="Run output root directory (default: input_dir/align_run)")
+    parser_align.add_argument("--resume", action="store_true", help="Resume from the latest valid alignment checkpoint")
     parser_align.add_argument("--threads", "-t", type=int, help="Number of threads (default: 1)")
 
     # search 子命令
@@ -721,6 +732,7 @@ def main() -> int:
     parser_search.add_argument("--query", "-q", help="Query FASTA file")
     parser_search.add_argument("--output", "-o", help="Output TSV file written under results/ unless absolute path is given")
     parser_search.add_argument("--outdir", help="Run output root directory (default: query_dir/search_run)")
+    parser_search.add_argument("--resume", action="store_true", help="Resume from the latest valid search checkpoint")
     parser_search.add_argument("--evalue", type=float, help="E-value threshold (default: 10.0)")
     parser_search.add_argument(
         "--max-target-seqs",

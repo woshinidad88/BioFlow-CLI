@@ -101,6 +101,7 @@ STRINGS = {
     "error_unexpected": "An unexpected error occurred: {err}",
     "press_enter": "Press Enter to continue...",
     "env_conda_missing": "Conda is not installed. Please install Conda first (https://docs.conda.io/).",
+    "resume_detected_prompt": "Existing run metadata detected in {path}. Resume from the latest valid checkpoint?",
 
     # === QC Pipeline ===
     "menu_qc": "[QC] Quality Control Pipeline",

@@ -98,11 +98,17 @@ bioflow qc --input reads.fastq --outdir runs/qc-001 --adapter adapters.fa --minl
 # Run QC pipeline from config
 bioflow qc --config examples/qc.yml
 
+# Resume an interrupted QC run
+bioflow qc --input reads.fastq --outdir runs/qc-001 --resume
+
 # Run alignment pipeline
 bioflow align --ref ref.fa --input reads.fastq --outdir runs/align-001 --output aligned.bam --threads 4
 
 # Run alignment pipeline from config
 bioflow align --config examples/align.yml
+
+# Resume an interrupted alignment run
+bioflow align --ref ref.fa --input reads.fastq --outdir runs/align-001 --resume
 
 # Run BLAST nucleotide search
 bioflow search --db ref.fa --query query.fa --outdir runs/search-001 --output hits.tsv --evalue 1e-5 --max-target-seqs 20
@@ -112,6 +118,9 @@ bioflow search --db ref.fa --query query.fa --output hits.tsv --top 3
 
 # Run BLAST search from config
 bioflow search --config examples/search.yml
+
+# Resume an interrupted BLAST search
+bioflow search --db ref.fa --query query.fa --outdir runs/search-001 --resume
 
 # List tool status
 bioflow env --list
@@ -161,6 +170,13 @@ bioflow --json batch -i ./data -o ./formatted
 - each run contains `logs/`, `results/`, `tmp/`, and `metadata.json`
 - on failure, diagnostic stdout/stderr logs are retained under `logs/`
 
+### Resume And Checkpoints
+
+- `bioflow qc --resume`, `bioflow align --resume`, and `bioflow search --resume` resume from the latest valid workflow checkpoint
+- completed steps are reused automatically when their key outputs remain valid
+- incomplete or corrupted intermediate outputs are detected and recomputed
+- TUI mode now prompts when an existing run directory contains resumable metadata
+
 ### Batch Concurrency
 
 - `bioflow batch --workers N` enables multi-process batch formatting
@@ -185,7 +201,7 @@ pip install -e .
 
 ## Project Status
 
-Current development version: **v0.5.0**
+Current development version: **v0.5.1**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

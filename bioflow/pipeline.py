@@ -13,12 +13,28 @@ from rich.panel import Panel
 
 from bioflow.i18n import t
 from bioflow.preflight import PreflightError, preflight_check
-from bioflow.run_layout import append_log, create_run_layout, utc_now_iso, write_metadata
+from bioflow.run_layout import (
+    STEP_FAILED,
+    STEP_RUNNING,
+    STEP_SKIPPED,
+    STEP_SUCCESS,
+    append_log,
+    create_run_layout,
+    init_steps,
+    read_metadata,
+    set_step_state,
+    step_succeeded,
+    utc_now_iso,
+    write_metadata,
+)
 
 console = Console()
 
 # QC 流程依赖的工具
 QC_REQUIRED_TOOLS = ("fastqc", "trimmomatic")
+QC_STEP_FASTQC_PRE = "fastqc_pre"
+QC_STEP_TRIM = "trimmomatic"
+QC_STEP_FASTQC_POST = "fastqc_post"
 
 
 def _run_cmd(
@@ -104,6 +120,16 @@ def _run_trimmomatic(
     )
 
 
+def _dir_has_outputs(path: Path) -> bool:
+    """目录存在且包含至少一个文件。"""
+    return path.is_dir() and any(child.is_file() for child in path.iterdir())
+
+
+def _is_nonempty_file(path: Path) -> bool:
+    """文件存在且非空。"""
+    return path.is_file() and path.stat().st_size > 0
+
+
 def run_qc_pipeline(
     input_file: Path,
     *,
@@ -111,6 +137,7 @@ def run_qc_pipeline(
     outdir: Path | None = None,
     adapter: str | None = None,
     minlen: int = 36,
+    resume: bool = False,
     cli_mode: bool = False,
     skip_preflight: bool = False,
 ) -> bool:
@@ -138,15 +165,31 @@ def run_qc_pipeline(
     fastqc_pre_dir = layout.results_dir / "fastqc_pre"
     fastqc_post_dir = layout.results_dir / "fastqc_post"
     trimmed_file = layout.results_dir / f"{input_file.stem}.trimmed{input_file.suffix}"
-    write_metadata(
-        layout,
-        status="running",
-        command="qc",
-        parameters={"adapter": adapter, "minlen": minlen},
-        inputs={"input": str(input_file)},
-        outputs={"root": str(layout.root), "trimmed": str(trimmed_file)},
-        started_at=started_at,
+    existing_metadata = read_metadata(layout)
+    steps = init_steps(
+        [QC_STEP_FASTQC_PRE, QC_STEP_TRIM, QC_STEP_FASTQC_POST],
+        existing_metadata.get("steps"),
     )
+
+    def persist(status: str, *, completed_at: str | None = None) -> None:
+        write_metadata(
+            layout,
+            status=status,
+            command="qc",
+            parameters={"adapter": adapter, "minlen": minlen, "resume": resume},
+            inputs={"input": str(input_file)},
+            outputs={
+                "root": str(layout.root),
+                "fastqc_pre": str(fastqc_pre_dir),
+                "fastqc_post": str(fastqc_post_dir),
+                "trimmed": str(trimmed_file),
+            },
+            started_at=started_at,
+            completed_at=completed_at,
+            extra={"steps": steps, "resume_used": resume},
+        )
+
+    persist("running")
 
     console.print(
         Panel(t("qc_pipeline_start", file=str(input_file)), style="bold magenta")
@@ -154,73 +197,58 @@ def run_qc_pipeline(
 
     # 3. 步骤 1：初始 FastQC
     console.print(t("qc_step_label", step="1/3", name="FastQC"), style="bold blue")
-    if not _run_fastqc(input_file, fastqc_pre_dir, stdout_log=layout.stdout_log, stderr_log=layout.stderr_log):
-        write_metadata(
-            layout,
-            status="failed",
-            command="qc",
-            parameters={"adapter": adapter, "minlen": minlen},
-            inputs={"input": str(input_file)},
-            outputs={"root": str(layout.root)},
-            started_at=started_at,
-            completed_at=utc_now_iso(),
-        )
-        return False
+    if resume and step_succeeded(steps, QC_STEP_FASTQC_PRE) and _dir_has_outputs(fastqc_pre_dir):
+        set_step_state(steps, QC_STEP_FASTQC_PRE, STEP_SKIPPED, outputs={"dir": str(fastqc_pre_dir)}, note="reused existing output")
+        persist("running")
+    else:
+        set_step_state(steps, QC_STEP_FASTQC_PRE, STEP_RUNNING)
+        persist("running")
+        if not _run_fastqc(input_file, fastqc_pre_dir, stdout_log=layout.stdout_log, stderr_log=layout.stderr_log):
+            set_step_state(steps, QC_STEP_FASTQC_PRE, STEP_FAILED, outputs={"dir": str(fastqc_pre_dir)})
+            persist("failed", completed_at=utc_now_iso())
+            return False
+        set_step_state(steps, QC_STEP_FASTQC_PRE, STEP_SUCCESS, outputs={"dir": str(fastqc_pre_dir)})
+        persist("running")
 
     # 4. 步骤 2：Trimmomatic 修剪
     console.print(
         t("qc_step_label", step="2/3", name="Trimmomatic"), style="bold blue"
     )
-    if not _run_trimmomatic(
-        input_file,
-        trimmed_file,
-        adapter=adapter,
-        minlen=minlen,
-        stdout_log=layout.stdout_log,
-        stderr_log=layout.stderr_log,
-    ):
-        write_metadata(
-            layout,
-            status="failed",
-            command="qc",
-            parameters={"adapter": adapter, "minlen": minlen},
-            inputs={"input": str(input_file)},
-            outputs={"root": str(layout.root), "trimmed": str(trimmed_file)},
-            started_at=started_at,
-            completed_at=utc_now_iso(),
-        )
-        return False
+    if resume and step_succeeded(steps, QC_STEP_TRIM) and _is_nonempty_file(trimmed_file):
+        set_step_state(steps, QC_STEP_TRIM, STEP_SKIPPED, outputs={"trimmed": str(trimmed_file)}, note="reused existing output")
+        persist("running")
+    else:
+        set_step_state(steps, QC_STEP_TRIM, STEP_RUNNING)
+        persist("running")
+        if not _run_trimmomatic(
+            input_file,
+            trimmed_file,
+            adapter=adapter,
+            minlen=minlen,
+            stdout_log=layout.stdout_log,
+            stderr_log=layout.stderr_log,
+        ):
+            set_step_state(steps, QC_STEP_TRIM, STEP_FAILED, outputs={"trimmed": str(trimmed_file)})
+            persist("failed", completed_at=utc_now_iso())
+            return False
+        set_step_state(steps, QC_STEP_TRIM, STEP_SUCCESS, outputs={"trimmed": str(trimmed_file)})
+        persist("running")
 
     # 5. 步骤 3：修剪后 FastQC
     console.print(t("qc_step_label", step="3/3", name="FastQC"), style="bold blue")
-    if not _run_fastqc(trimmed_file, fastqc_post_dir, stdout_log=layout.stdout_log, stderr_log=layout.stderr_log):
-        write_metadata(
-            layout,
-            status="failed",
-            command="qc",
-            parameters={"adapter": adapter, "minlen": minlen},
-            inputs={"input": str(input_file)},
-            outputs={"root": str(layout.root), "trimmed": str(trimmed_file)},
-            started_at=started_at,
-            completed_at=utc_now_iso(),
-        )
-        return False
+    if resume and step_succeeded(steps, QC_STEP_FASTQC_POST) and _dir_has_outputs(fastqc_post_dir):
+        set_step_state(steps, QC_STEP_FASTQC_POST, STEP_SKIPPED, outputs={"dir": str(fastqc_post_dir)}, note="reused existing output")
+        persist("running")
+    else:
+        set_step_state(steps, QC_STEP_FASTQC_POST, STEP_RUNNING)
+        persist("running")
+        if not _run_fastqc(trimmed_file, fastqc_post_dir, stdout_log=layout.stdout_log, stderr_log=layout.stderr_log):
+            set_step_state(steps, QC_STEP_FASTQC_POST, STEP_FAILED, outputs={"dir": str(fastqc_post_dir)})
+            persist("failed", completed_at=utc_now_iso())
+            return False
+        set_step_state(steps, QC_STEP_FASTQC_POST, STEP_SUCCESS, outputs={"dir": str(fastqc_post_dir)})
 
-    write_metadata(
-        layout,
-        status="success",
-        command="qc",
-        parameters={"adapter": adapter, "minlen": minlen},
-        inputs={"input": str(input_file)},
-        outputs={
-            "root": str(layout.root),
-            "fastqc_pre": str(fastqc_pre_dir),
-            "fastqc_post": str(fastqc_post_dir),
-            "trimmed": str(trimmed_file),
-        },
-        started_at=started_at,
-        completed_at=utc_now_iso(),
-    )
+    persist("success", completed_at=utc_now_iso())
     console.print(
         t("qc_pipeline_done", output=str(layout.root)), style="bold green"
     )
@@ -260,6 +288,17 @@ def qc_menu() -> None:
         return
     if not output_path:
         return
+    resume = False
+    if (Path(output_path) / "metadata.json").exists():
+        try:
+            resume = bool(
+                questionary.confirm(
+                    t("resume_detected_prompt", path=str(output_path)),
+                    default=True,
+                ).ask()
+            )
+        except KeyboardInterrupt:
+            return
 
     # Adapter 文件（可选）
     try:
@@ -282,6 +321,7 @@ def qc_menu() -> None:
         output_dir=Path(output_path),
         adapter=adapter,
         minlen=minlen,
+        resume=resume,
         cli_mode=False,
         skip_preflight=True,
     )

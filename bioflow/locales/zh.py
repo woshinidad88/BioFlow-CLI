@@ -101,6 +101,7 @@ STRINGS = {
     "error_unexpected": "发生意外错误：{err}",
     "press_enter": "按 Enter 键继续...",
     "env_conda_missing": "未检测到 Conda，请先安装 Conda（https://docs.conda.io/）。",
+    "resume_detected_prompt": "在 {path} 中检测到已有运行 metadata，是否从最近一次有效检查点恢复执行？",
 
     # === 质控流程 ===
     "menu_qc": "[质控] QC Pipeline",

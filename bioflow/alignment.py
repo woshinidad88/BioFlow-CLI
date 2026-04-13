@@ -16,9 +16,17 @@ from rich.table import Table
 from bioflow.i18n import t
 from bioflow.preflight import preflight_check
 from bioflow.run_layout import (
+    STEP_FAILED,
+    STEP_RUNNING,
+    STEP_SKIPPED,
+    STEP_SUCCESS,
     append_log,
     create_run_layout,
+    init_steps,
+    read_metadata,
     resolve_result_path,
+    set_step_state,
+    step_succeeded,
     utc_now_iso,
     write_metadata,
 )
@@ -27,6 +35,10 @@ console = Console()
 
 # 比对流程依赖的工具
 ALIGN_REQUIRED_TOOLS = ("bwa", "samtools")
+ALIGN_STEP_INDEX = "bwa_index"
+ALIGN_STEP_MAP = "map_sort"
+ALIGN_STEP_BAM_INDEX = "bam_index"
+ALIGN_STEP_FLAGSTAT = "flagstat"
 
 
 def _print_alignment_failure(description: str, err: str) -> bool:
@@ -171,6 +183,22 @@ def _bwa_index_files(ref: Path) -> list[Path]:
 def _default_output_bam(reads: Path) -> Path:
     """返回默认输出 BAM 路径。"""
     return reads.parent / f"{reads.stem}.sorted.bam"
+
+
+def _is_nonempty_file(path: Path) -> bool:
+    """文件存在且非空。"""
+    return path.is_file() and path.stat().st_size > 0
+
+
+def _flagstat_ready(path: Path) -> bool:
+    """flagstat 输出存在且可解析。"""
+    if not _is_nonempty_file(path):
+        return False
+    try:
+        parse_flagstat(path.read_text(encoding="utf-8"))
+    except OSError:
+        return False
+    return True
 
 
 def _parse_threads(value: str | None) -> int:
@@ -339,6 +367,7 @@ def run_alignment_pipeline(
     *,
     outdir: Path | None = None,
     threads: int = 1,
+    resume: bool = False,
     cli_mode: bool = False,
     skip_preflight: bool = False,
 ) -> dict[str, int | float] | None:
@@ -366,118 +395,114 @@ def run_alignment_pipeline(
     if platform.system() == "Windows":
         console.print(t("align_windows_warn"), style="bold yellow")
 
-    # 2. 准备输出路径
     layout = create_run_layout("align", reads, outdir=outdir)
     started_at = utc_now_iso()
     output = resolve_result_path(layout, output, _default_output_bam(reads).name)
-    write_metadata(
-        layout,
-        status="running",
-        command="align",
-        parameters={"threads": threads},
-        inputs={"ref": str(ref), "reads": str(reads)},
-        outputs={"root": str(layout.root), "bam": str(output)},
-        started_at=started_at,
+    bai_path = output.with_suffix(output.suffix + ".bai")
+    flagstat_path = layout.results_dir / f"{output.stem}.flagstat.txt"
+    existing_metadata = read_metadata(layout)
+    steps = init_steps(
+        [ALIGN_STEP_INDEX, ALIGN_STEP_MAP, ALIGN_STEP_BAM_INDEX, ALIGN_STEP_FLAGSTAT],
+        existing_metadata.get("steps"),
     )
+
+    def persist(status: str, *, completed_at: str | None = None, stats: dict[str, int | float] | None = None) -> None:
+        extra: dict[str, object] = {"steps": steps, "resume_used": resume}
+        if stats is not None:
+            extra["stats"] = stats
+        write_metadata(
+            layout,
+            status=status,
+            command="align",
+            parameters={"threads": threads, "resume": resume},
+            inputs={"ref": str(ref), "reads": str(reads)},
+            outputs={"root": str(layout.root), "bam": str(output), "flagstat": str(flagstat_path)},
+            started_at=started_at,
+            completed_at=completed_at,
+            extra=extra,
+        )
+
+    persist("running")
 
     console.print(
         Panel(t("align_pipeline_start", file=str(reads)), style="bold magenta")
     )
 
-    # 3. 步骤 1：BWA 索引（检查是否已存在）
     bwa_index_files = _bwa_index_files(ref)
-    if all(f.exists() for f in bwa_index_files):
+    if resume and step_succeeded(steps, ALIGN_STEP_INDEX) and all(f.exists() for f in bwa_index_files):
+        set_step_state(steps, ALIGN_STEP_INDEX, STEP_SKIPPED, outputs={"index_files": [str(f) for f in bwa_index_files]}, note="reused existing output")
+        persist("running")
+        console.print(_format_step_label("1/4", "align_step_index_cached"), style="bold blue")
+    elif all(f.exists() for f in bwa_index_files):
+        set_step_state(steps, ALIGN_STEP_INDEX, STEP_SUCCESS, outputs={"index_files": [str(f) for f in bwa_index_files]})
+        persist("running")
         console.print(_format_step_label("1/4", "align_step_index_cached"), style="bold blue")
     else:
         console.print(_format_step_label("1/4", "align_step_index"), style="bold blue")
+        set_step_state(steps, ALIGN_STEP_INDEX, STEP_RUNNING)
+        persist("running")
         if not _run_bwa_index(ref, stdout_log=layout.stdout_log, stderr_log=layout.stderr_log):
-            write_metadata(
-                layout,
-                status="failed",
-                command="align",
-                parameters={"threads": threads},
-                inputs={"ref": str(ref), "reads": str(reads)},
-                outputs={"root": str(layout.root), "bam": str(output)},
-                started_at=started_at,
-                completed_at=utc_now_iso(),
-            )
+            set_step_state(steps, ALIGN_STEP_INDEX, STEP_FAILED, outputs={"index_files": [str(f) for f in bwa_index_files]})
+            persist("failed", completed_at=utc_now_iso())
             return None
+        set_step_state(steps, ALIGN_STEP_INDEX, STEP_SUCCESS, outputs={"index_files": [str(f) for f in bwa_index_files]})
+        persist("running")
 
-    # 4. 步骤 2：BWA mem + SAMtools view/sort
     console.print(_format_step_label("2/4", "align_step_map_sort"), style="bold blue")
-    if not _run_bwa_mem_pipe_sort(
-        ref,
-        reads,
-        output,
-        threads=threads,
-        stdout_log=layout.stdout_log,
-        stderr_log=layout.stderr_log,
-    ):
-        write_metadata(
-            layout,
-            status="failed",
-            command="align",
-            parameters={"threads": threads},
-            inputs={"ref": str(ref), "reads": str(reads)},
-            outputs={"root": str(layout.root), "bam": str(output)},
-            started_at=started_at,
-            completed_at=utc_now_iso(),
-        )
-        return None
+    if resume and step_succeeded(steps, ALIGN_STEP_MAP) and _is_nonempty_file(output):
+        set_step_state(steps, ALIGN_STEP_MAP, STEP_SKIPPED, outputs={"bam": str(output)}, note="reused existing output")
+        persist("running")
+    else:
+        set_step_state(steps, ALIGN_STEP_MAP, STEP_RUNNING)
+        persist("running")
+        if not _run_bwa_mem_pipe_sort(
+            ref,
+            reads,
+            output,
+            threads=threads,
+            stdout_log=layout.stdout_log,
+            stderr_log=layout.stderr_log,
+        ):
+            set_step_state(steps, ALIGN_STEP_MAP, STEP_FAILED, outputs={"bam": str(output)})
+            persist("failed", completed_at=utc_now_iso())
+            return None
+        set_step_state(steps, ALIGN_STEP_MAP, STEP_SUCCESS, outputs={"bam": str(output)})
+        persist("running")
 
-    # 5. 步骤 3：SAMtools index
     console.print(_format_step_label("3/4", "align_step_bam_index"), style="bold blue")
-    if not _run_samtools_index(output, stdout_log=layout.stdout_log, stderr_log=layout.stderr_log):
-        write_metadata(
-            layout,
-            status="failed",
-            command="align",
-            parameters={"threads": threads},
-            inputs={"ref": str(ref), "reads": str(reads)},
-            outputs={"root": str(layout.root), "bam": str(output)},
-            started_at=started_at,
-            completed_at=utc_now_iso(),
-        )
-        return None
+    if resume and step_succeeded(steps, ALIGN_STEP_BAM_INDEX) and _is_nonempty_file(bai_path):
+        set_step_state(steps, ALIGN_STEP_BAM_INDEX, STEP_SKIPPED, outputs={"bai": str(bai_path)}, note="reused existing output")
+        persist("running")
+    else:
+        set_step_state(steps, ALIGN_STEP_BAM_INDEX, STEP_RUNNING)
+        persist("running")
+        if not _run_samtools_index(output, stdout_log=layout.stdout_log, stderr_log=layout.stderr_log):
+            set_step_state(steps, ALIGN_STEP_BAM_INDEX, STEP_FAILED, outputs={"bai": str(bai_path)})
+            persist("failed", completed_at=utc_now_iso())
+            return None
+        set_step_state(steps, ALIGN_STEP_BAM_INDEX, STEP_SUCCESS, outputs={"bai": str(bai_path)})
+        persist("running")
 
-    # 6. 步骤 4：SAMtools flagstat
     console.print(_format_step_label("4/4", "align_step_flagstat"), style="bold blue")
-    flagstat_text = _run_samtools_flagstat(output, stdout_log=layout.stdout_log, stderr_log=layout.stderr_log)
-    if flagstat_text is None:
-        write_metadata(
-            layout,
-            status="failed",
-            command="align",
-            parameters={"threads": threads},
-            inputs={"ref": str(ref), "reads": str(reads)},
-            outputs={"root": str(layout.root), "bam": str(output)},
-            started_at=started_at,
-            completed_at=utc_now_iso(),
-        )
-        return None
+    if resume and step_succeeded(steps, ALIGN_STEP_FLAGSTAT) and _flagstat_ready(flagstat_path):
+        flagstat_text = flagstat_path.read_text(encoding="utf-8")
+        set_step_state(steps, ALIGN_STEP_FLAGSTAT, STEP_SKIPPED, outputs={"flagstat": str(flagstat_path)}, note="reused existing output")
+        persist("running")
+    else:
+        set_step_state(steps, ALIGN_STEP_FLAGSTAT, STEP_RUNNING)
+        persist("running")
+        flagstat_text = _run_samtools_flagstat(output, stdout_log=layout.stdout_log, stderr_log=layout.stderr_log)
+        if flagstat_text is None:
+            set_step_state(steps, ALIGN_STEP_FLAGSTAT, STEP_FAILED, outputs={"flagstat": str(flagstat_path)})
+            persist("failed", completed_at=utc_now_iso())
+            return None
+        flagstat_path.write_text(flagstat_text, encoding="utf-8")
+        set_step_state(steps, ALIGN_STEP_FLAGSTAT, STEP_SUCCESS, outputs={"flagstat": str(flagstat_path)})
+        persist("running")
 
     stats = parse_flagstat(flagstat_text)
-    flagstat_path = layout.results_dir / f"{output.stem}.flagstat.txt"
-    flagstat_path.write_text(flagstat_text, encoding="utf-8")
-
-    # 显示统计
     display_alignment_stats(stats)
-
-    write_metadata(
-        layout,
-        status="success",
-        command="align",
-        parameters={"threads": threads},
-        inputs={"ref": str(ref), "reads": str(reads)},
-        outputs={
-            "root": str(layout.root),
-            "bam": str(output),
-            "flagstat": str(flagstat_path),
-        },
-        started_at=started_at,
-        completed_at=utc_now_iso(),
-        extra={"stats": stats},
-    )
+    persist("success", completed_at=utc_now_iso(), stats=stats)
 
     console.print(
         t("align_pipeline_done", output=str(layout.root)), style="bold green"
@@ -532,6 +557,21 @@ def align_menu() -> None:
         return
     if not output_path:
         return
+    resume = False
+    run_root = reads.parent / "align_run"
+    output_candidate = Path(output_path)
+    if output_candidate.parent.name == "results":
+        run_root = output_candidate.parent.parent
+    if (run_root / "metadata.json").exists():
+        try:
+            resume = bool(
+                questionary.confirm(
+                    t("resume_detected_prompt", path=str(run_root)),
+                    default=True,
+                ).ask()
+            )
+        except KeyboardInterrupt:
+            return
 
     # 线程数
     threads_str = questionary.text(t("align_threads_prompt"), default="1").ask()
@@ -542,7 +582,9 @@ def align_menu() -> None:
         ref,
         reads,
         output=Path(output_path),
+        outdir=run_root,
         threads=threads,
+        resume=resume,
         cli_mode=False,
         skip_preflight=True,
     )
