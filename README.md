@@ -34,6 +34,7 @@ License text: [MIT License](LICENSE)
   - `makeblastdb` + `blastn` nucleotide search workflow
   - Tabular result output (`outfmt 6`) for downstream analysis
 - **QC Pipeline**: Integrated FastQC + Trimmomatic workflow
+- **HTML Run Reports**: Export one or more workflow runs into a portable single-file HTML summary
 - **YAML Workflow Config**: run QC / alignment / search from reusable config files
 - **Structured Output**: `--json` output for automation pipelines
 - **Stable Exit Codes**: standardized success/error/dependency signaling
@@ -122,6 +123,12 @@ bioflow search --config examples/search.yml
 # Resume an interrupted BLAST search
 bioflow search --db ref.fa --query query.fa --outdir runs/search-001 --resume
 
+# Export an HTML report for one run
+bioflow report --input runs/qc-001 --output qc-report.html
+
+# Export a combined HTML report for multiple runs under one directory
+bioflow report --input runs --output runs-report.html --title "BioFlow Run Summary"
+
 # List tool status
 bioflow env --list
 
@@ -177,6 +184,13 @@ bioflow --json batch -i ./data -o ./formatted
 - incomplete or corrupted intermediate outputs are detected and recomputed
 - TUI mode now prompts when an existing run directory contains resumable metadata
 
+### HTML Reports
+
+- `bioflow report --input <run_dir>` exports a single-run HTML report from `metadata.json`
+- `bioflow report --input <parent_dir>` scans immediate subdirectories and combines multiple runs into one report
+- the generated report includes workflow summary, parameters, input/output paths, and per-step status
+- TUI mode also exposes report export from the main menu
+
 ### Batch Concurrency
 
 - `bioflow batch --workers N` enables multi-process batch formatting
@@ -196,12 +210,12 @@ Language config is saved per OS:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e .[dev]
 ```
 
 ## Project Status
 
-Current development version: **v0.5.1**
+Current development version: **v0.5.2**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

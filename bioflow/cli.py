@@ -25,6 +25,7 @@ from bioflow.config import ConfigError, load_workflow_config
 from bioflow.i18n import init_language, t
 from bioflow.pipeline import run_qc_pipeline
 from bioflow.preflight import PreflightError
+from bioflow.report import generate_report
 from bioflow.search import run_blast_search
 
 # 退出码标准
@@ -552,6 +553,52 @@ def cmd_align(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    """处理 report 子命令：生成 HTML 运行报告。"""
+    input_path = Path(args.input)
+    output_path = Path(args.output) if args.output else Path("report.html")
+    title = args.title if hasattr(args, "title") and args.title else None
+    quiet = args.quiet or args.json
+
+    if not input_path.exists() or not input_path.is_dir():
+        if args.json:
+            print(json.dumps({"error": "path_not_found", "path": str(input_path)}, ensure_ascii=False))
+        else:
+            console_err.print(t("report_invalid_input", path=str(input_path)), style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    try:
+        if not quiet:
+            console_err.print(t("report_generating"), style="cyan")
+
+        result_path = generate_report(input_path, output_path, title=title)
+
+        if args.json:
+            print(json.dumps({
+                "status": "success",
+                "input": str(input_path),
+                "output": str(result_path),
+            }, ensure_ascii=False))
+        elif not quiet:
+            console_err.print(t("report_done", path=str(result_path)), style="bold green")
+
+        return EXIT_SUCCESS
+
+    except FileNotFoundError as exc:
+        if args.json:
+            print(json.dumps({"error": "no_runs_found", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(str(exc), style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"error": "runtime_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(t("error_unexpected", err=str(exc)), style="bold red")
+        return EXIT_RUNTIME_ERROR
+
+
 def cmd_search(args: argparse.Namespace) -> int:
     """处理 search 子命令：BLAST 检索流程。"""
     try:
@@ -741,6 +788,12 @@ def main() -> int:
     )
     parser_search.add_argument("--top", type=int, help="Number of top hits to summarize (default: 5)")
 
+    # report 子命令
+    parser_report = subparsers.add_parser("report", help="Generate HTML run report")
+    parser_report.add_argument("--input", "-i", required=True, help="Run directory or parent directory containing runs")
+    parser_report.add_argument("--output", "-o", help="Output HTML file (default: report.html)")
+    parser_report.add_argument("--title", help="Custom report title")
+
     args = parser.parse_args()
 
     # 初始化
@@ -765,6 +818,8 @@ def main() -> int:
         return cmd_align(args)
     elif args.command == "search":
         return cmd_search(args)
+    elif args.command == "report":
+        return cmd_report(args)
     else:
         parser.print_help(sys.stderr)
         return EXIT_ARGUMENT_ERROR

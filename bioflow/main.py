@@ -17,6 +17,7 @@ from bioflow.bio_tasks import seq_menu
 from bioflow.env_manager import env_menu
 from bioflow.pipeline import qc_menu
 from bioflow.i18n import init_language, load_config, set_language, t
+from bioflow.report import report_menu
 from bioflow.search import search_menu
 
 console = Console()
@@ -86,6 +87,7 @@ def main_menu() -> None:
             t("menu_qc"),
             t("menu_align"),
             t("menu_search"),
+            t("menu_report"),
             t("menu_settings"),
             t("menu_exit"),
         ]
@@ -115,6 +117,8 @@ def main_menu() -> None:
             align_menu()
         elif answer == t("menu_search"):
             search_menu()
+        elif answer == t("menu_report"):
+            report_menu()
         elif answer == t("menu_settings"):
             select_language()
 

@@ -29,7 +29,10 @@ BioFlow-CLI 是一个基于 **MIT 许可证** 发布的 **开源项目**。
 - **序列比对** — 集成 BWA + SAMtools 完整流程，支持建索引、比对、排序、BAM 索引与比对统计
 - **BLAST 检索** — 集成 `makeblastdb` + `blastn` 基础核酸检索流程，输出标准 tabular 结果
 - **QC 流程** — 集成 FastQC + Trimmomatic 的质量控制流水线
+- **HTML 运行报告** — 可将单次或多次工作流运行导出为单文件 HTML 汇总报告
 - **YAML 工作流配置** — 可通过配置文件复用 QC / 比对 / 检索参数
+- **结构化输出** — 支持 `--json` 输出，便于自动化集成和脚本调用
+- **标准退出码** — 提供统一的成功 / 参数错误 / 运行时错误 / 依赖缺失状态码
 
 ## 快速开始
 
@@ -87,6 +90,7 @@ BioFlow-CLI/
 │   ├── alignment.py       # 序列比对流程
 │   ├── search.py          # BLAST 检索流程
 │   ├── pipeline.py        # QC 流程管理
+│   ├── report.py          # HTML 运行报告导出
 │   ├── preflight.py       # 环境预检
 │   └── locales/
 │       ├── __init__.py    # 语言包注册
@@ -161,6 +165,12 @@ bioflow search --config examples/search.yml
 # 恢复中断的 BLAST 检索
 bioflow search --db ref.fa --query query.fa --outdir runs/search-001 --resume
 
+# 为单次运行导出 HTML 报告
+bioflow report --input runs/qc-001 --output qc-report.html
+
+# 为目录下多次运行导出汇总 HTML 报告
+bioflow report --input runs --output runs-report.html --title "BioFlow 运行汇总"
+
 # 列出生物工具安装状态
 bioflow env --list
 
@@ -214,6 +224,13 @@ bioflow --json batch -i ./data -o ./formatted
 - 缺失或损坏的中间结果会被识别并重新计算
 - TUI 模式下检测到可恢复运行目录时会给出恢复提示
 
+#### HTML 报告导出
+
+- `bioflow report --input <run_dir>` 可基于 `metadata.json` 导出单次运行报告
+- `bioflow report --input <parent_dir>` 会扫描其一级子目录并合并多次运行结果
+- 生成的报告包含运行摘要、参数、输入/输出路径以及步骤状态表
+- TUI 主菜单也已提供报告导出入口
+
 #### 批量并发
 
 - `bioflow batch --workers N` 可启用多进程批量格式化
@@ -233,12 +250,12 @@ bioflow --json batch -i ./data -o ./formatted
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e .[dev]
 ```
 
 ## 项目状态
 
-当前开发版本：**v0.5.1**
+当前开发版本：**v0.5.2**
 
 ## 许可证
 
