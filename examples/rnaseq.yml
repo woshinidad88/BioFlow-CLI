@@ -1,0 +1,16 @@
+rnaseq:
+  transcriptome: transcripts.fa
+  input_r1: reads_1.fastq
+  input_r2: reads_2.fastq
+  outdir: runs/rnaseq-001
+  sample_id: sample-rnaseq
+  group: control
+  condition: untreated
+  library_type: A
+  profile: workstation
+  backend: conda
+  conda_env: bioflow-env
+  threads: 8
+  memory: 16G
+  queue: short
+  time_limit: "04:00:00"

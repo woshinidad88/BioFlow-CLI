@@ -125,10 +125,25 @@ def _validate_single_or_paired_inputs(
         raise ConfigError(
             f"{context} paired-end config requires both 'input_r1' and 'input_r2'"
         )
-    if require_input and workflow in {"qc", "align"} and not has_single and not (has_r1 and has_r2):
+    if require_input and workflow in {"qc", "align", "rnaseq"} and not has_single and not (has_r1 and has_r2):
         raise ConfigError(
             f"{context} requires 'input' or both 'input_r1' and 'input_r2'"
         )
+
+
+def _validate_rnaseq_reference(
+    data: dict[str, Any],
+    *,
+    context: str,
+    require_reference: bool = False,
+) -> None:
+    """Validate the mutually exclusive Salmon reference inputs."""
+    has_transcriptome = bool(data.get("transcriptome"))
+    has_index = bool(data.get("index"))
+    if has_transcriptome and has_index:
+        raise ConfigError(f"{context} cannot mix 'transcriptome' with 'index'")
+    if require_reference and not has_transcriptome and not has_index:
+        raise ConfigError(f"{context} requires 'transcriptome' or 'index'")
 
 
 def _read_yaml_mapping(config_path: Path) -> dict[str, Any]:
@@ -179,8 +194,10 @@ def load_workflow_config(config_path: Path, workflow: str) -> dict[str, Any]:
             f"Unknown config keys for {workflow}: {', '.join(unknown)}"
         )
 
-    if workflow in {"qc", "align"}:
+    if workflow in {"qc", "align", "rnaseq"}:
         _validate_single_or_paired_inputs(data, workflow, context=f"{workflow} config")
+    if workflow == "rnaseq":
+        _validate_rnaseq_reference(data, context="rnaseq config")
     _validate_manifest_fields(data, workflow, context=f"{workflow} config")
     _validate_execution_options(data, context=f"{workflow} config")
 
@@ -245,12 +262,18 @@ def load_project_config(config_path: Path) -> dict[str, Any]:
             project_sample=True,
         )
 
-        if workflow in {"qc", "align"}:
+        if workflow in {"qc", "align", "rnaseq"}:
             _validate_single_or_paired_inputs(
                 item,
                 workflow,
                 context=f"Project sample '{sample_id}'",
                 require_input=True,
+            )
+        if workflow == "rnaseq":
+            _validate_rnaseq_reference(
+                item,
+                context=f"Project sample '{sample_id}'",
+                require_reference=True,
             )
         manifest = get_workflow_manifest(workflow)
         required_fields = tuple(

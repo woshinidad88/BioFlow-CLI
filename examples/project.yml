@@ -31,6 +31,15 @@ project:
       profile: local
       backend: container
       container_image: ghcr.io/biocael-dev/bioflow-cli:latest
-      evalue: 1e-5
+      evalue: 0.00001
       max_target_seqs: 20
       top: 5
+    - sample_id: sample-rnaseq
+      workflow: rnaseq
+      index: salmon-transcriptome-index
+      input_r1: rnaseq_1.fastq
+      input_r2: rnaseq_2.fastq
+      group: control
+      condition: untreated
+      library_type: A
+      threads: 8

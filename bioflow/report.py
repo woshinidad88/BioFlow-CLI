@@ -421,6 +421,20 @@ def _metric_payload(run: RunInfo) -> dict[str, Any]:
         best_hit = run.summary.get("best_hit")
         if isinstance(best_hit, dict) and best_hit.get("subject_id") not in (None, ""):
             metrics["best_hit"] = best_hit["subject_id"]
+    elif run.workflow == "rnaseq":
+        for key in (
+            "processed_fragments",
+            "mapped_fragments",
+            "mapping_rate",
+            "transcript_count",
+            "expressed_transcripts",
+            "total_tpm",
+            "estimated_num_reads",
+        ):
+            if key in run.stats:
+                metrics[key] = run.stats[key]
+            elif key in run.summary:
+                metrics[key] = run.summary[key]
 
     for key, value in run.stats.items():
         metrics.setdefault(key, value)
@@ -436,6 +450,7 @@ def _key_metric(run: RunInfo, metrics: dict[str, Any]) -> tuple[str, Any]:
         "qc": ("trimmed_reads", "reads", "avg_q"),
         "align": ("mapping_rate", "mapped", "total"),
         "search": ("hit_count", "best_hit", "best_bitscore"),
+        "rnaseq": ("mapping_rate", "mapped_fragments", "expressed_transcripts"),
     }
     for key in preferred_by_workflow.get(run.workflow, ()):
         if key in metrics:
@@ -578,6 +593,17 @@ def _core_outputs(run: RunInfo) -> dict[str, Any]:
             core["best_hit"] = best_hit["subject_id"]
         return core
 
+    if run.workflow == "rnaseq":
+        core = {
+            key: outputs[key]
+            for key in ("quant_sf", "meta_info", "summary", "fastqc", "salmon_index")
+            if key in outputs
+        }
+        for key in ("mapping_rate", "mapped_fragments", "expressed_transcripts"):
+            if key in run.summary:
+                core[key] = run.summary[key]
+        return core
+
     return outputs
 
 
@@ -618,6 +644,28 @@ def _workflow_metric_rows(workflow: str, runs: list[RunInfo]) -> dict[str, Any]:
                 trimmed.append(value)
         if trimmed:
             metrics[t("report_metric_trimmed_reads")] = sum(trimmed)
+    elif workflow == "rnaseq":
+        rates = [
+            float(run.summary["mapping_rate"])
+            for run in successful
+            if isinstance(run.summary.get("mapping_rate"), (int, float))
+        ]
+        mapped = [
+            int(run.summary["mapped_fragments"])
+            for run in successful
+            if isinstance(run.summary.get("mapped_fragments"), int)
+        ]
+        expressed = [
+            int(run.summary["expressed_transcripts"])
+            for run in successful
+            if isinstance(run.summary.get("expressed_transcripts"), int)
+        ]
+        if rates:
+            metrics[t("report_metric_rnaseq_mapping_rate")] = sum(rates) / len(rates)
+        if mapped:
+            metrics[t("report_metric_rnaseq_mapped")] = sum(mapped)
+        if expressed:
+            metrics[t("report_metric_rnaseq_expressed")] = sum(expressed)
 
     return metrics
 

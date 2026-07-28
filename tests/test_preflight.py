@@ -11,6 +11,10 @@ def test_preflight_check_system_success(monkeypatch) -> None:
     assert preflight.preflight_check(["fastqc"], cli_mode=True) is True
 
 
+def test_preflight_registry_includes_salmon() -> None:
+    assert preflight.TOOL_REGISTRY["salmon"][0] == "salmon"
+
+
 def test_preflight_check_conda_backend_requires_runtime(monkeypatch) -> None:
     monkeypatch.setattr(preflight, "check_tool", lambda _name: True)
     monkeypatch.setattr(preflight, "_check_conda", lambda: False)
@@ -37,6 +41,22 @@ def test_preflight_check_conda_backend_requires_env(monkeypatch) -> None:
     assert exc.backend == "conda"
     assert exc.reason == "missing_conda_env"
     assert exc.conda_env == "bioflow-env"
+
+
+def test_preflight_conda_backend_does_not_require_tools_on_host(monkeypatch) -> None:
+    monkeypatch.setattr(preflight, "check_tool", lambda _name: False)
+    monkeypatch.setattr(preflight, "_check_conda", lambda: True)
+    monkeypatch.setattr(preflight, "_check_conda_env", lambda _name: True)
+
+    assert (
+        preflight.preflight_check(
+            ["fastqc", "salmon"],
+            backend="conda",
+            conda_env="bioflow-env",
+            cli_mode=True,
+        )
+        is True
+    )
 
 
 def test_preflight_check_container_backend_requires_runtime(monkeypatch) -> None:
@@ -69,3 +89,17 @@ def test_preflight_check_container_backend_requires_image(monkeypatch) -> None:
     assert exc.backend == "container"
     assert exc.reason == "missing_container_image"
 
+
+def test_preflight_container_backend_does_not_require_tools_on_host(monkeypatch) -> None:
+    monkeypatch.setattr(preflight, "check_tool", lambda _name: False)
+    monkeypatch.setattr(preflight, "_check_container_runtime", lambda runtime: runtime == "docker")
+
+    assert (
+        preflight.preflight_check(
+            ["fastqc", "salmon"],
+            backend="container",
+            container_image="ghcr.io/demo/rnaseq:latest",
+            cli_mode=True,
+        )
+        is True
+    )

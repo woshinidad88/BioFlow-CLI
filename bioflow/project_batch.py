@@ -24,6 +24,7 @@ from bioflow.report import (
     write_summary_tsv,
 )
 from bioflow.run_layout import read_metadata, utc_now_iso
+from bioflow.rnaseq import run_rnaseq_pipeline
 from bioflow.search import run_blast_search
 
 console = Console(stderr=True)
@@ -159,6 +160,31 @@ def _run_project_job(run_dir: Path, sample: dict[str, Any]) -> ProjectJobResult:
                     workflow,
                     run_dir,
                     str(metadata.get("failure_summary", "search failed")),
+                )
+        elif workflow == "rnaseq":
+            result = run_rnaseq_pipeline(
+                Path(sample["transcriptome"]) if sample.get("transcriptome") else None,
+                Path(sample["input"]) if sample.get("input") else None,
+                index=Path(sample["index"]) if sample.get("index") else None,
+                input_r1=Path(sample["input_r1"]) if sample.get("input_r1") else None,
+                input_r2=Path(sample["input_r2"]) if sample.get("input_r2") else None,
+                outdir=run_dir,
+                threads=int(sample.get("threads", 1)),
+                library_type=str(sample.get("library_type", "A")),
+                sample_id=sample_id,
+                group=str(sample["group"]) if sample.get("group") else None,
+                condition=str(sample["condition"]) if sample.get("condition") else None,
+                resume=bool(sample.get("resume", False)),
+                execution=execution,
+                cli_mode=True,
+            )
+            if result is None:
+                metadata = _read_run_metadata(run_dir)
+                return _job_failure(
+                    sample_id,
+                    workflow,
+                    run_dir,
+                    str(metadata.get("failure_summary", "rnaseq failed")),
                 )
         else:  # pragma: no cover
             return _job_failure(sample_id, workflow, run_dir, f"unsupported workflow: {workflow}")

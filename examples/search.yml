@@ -10,6 +10,6 @@ search:
   memory: 4G
   queue: short
   time_limit: "01:00:00"
-  evalue: 1e-5
+  evalue: 0.00001
   max_target_seqs: 20
   top: 5

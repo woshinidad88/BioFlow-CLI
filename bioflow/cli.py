@@ -29,6 +29,7 @@ from bioflow.pipeline import run_qc_pipeline
 from bioflow.preflight import PreflightError
 from bioflow.project_batch import run_project_batch
 from bioflow.report import collect_summary_data, generate_report, write_summary_json, write_summary_tsv
+from bioflow.rnaseq import run_rnaseq_pipeline
 from bioflow.run_layout import format_failure_diagnostics
 from bioflow.search import run_blast_search
 
@@ -911,6 +912,143 @@ def cmd_search(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
 
 
+def cmd_rnaseq(args: argparse.Namespace) -> int:
+    """Handle the RNA-seq FastQC + Salmon workflow."""
+    try:
+        params = _merge_workflow_args(
+            args,
+            "rnaseq",
+            {
+                "transcriptome": None,
+                "index": None,
+                "input": None,
+                "input_r1": None,
+                "input_r2": None,
+                "outdir": None,
+                "threads": 1,
+                "library_type": "A",
+                "sample_id": None,
+                "group": None,
+                "condition": None,
+                "resume": False,
+                "profile": "local",
+                "memory": None,
+                "queue": None,
+                "time_limit": None,
+                "backend": "system",
+                "conda_env": None,
+                "container_image": None,
+            },
+        )
+    except ConfigError as exc:
+        if args.json:
+            print(json.dumps({"error": "config_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: {exc}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    inputs = _validate_single_or_paired_inputs(
+        input_value=params["input"],
+        input_r1_value=params["input_r1"],
+        input_r2_value=params["input_r2"],
+        workflow="rnaseq",
+    )
+    if isinstance(inputs, str):
+        if args.json:
+            print(_json_error_payload("invalid_input_combination", message=inputs))
+        else:
+            console_err.print(f"Error: {inputs}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    has_transcriptome = bool(params["transcriptome"])
+    has_index = bool(params["index"])
+    if has_transcriptome == has_index:
+        message = "rnaseq requires exactly one of transcriptome or index"
+        if args.json:
+            print(_json_error_payload("invalid_reference_combination", message=message))
+        else:
+            console_err.print(f"Error: {message}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    transcriptome = Path(str(params["transcriptome"])) if has_transcriptome else None
+    index = Path(str(params["index"])) if has_index else None
+    input_path, input_r1_path, input_r2_path = inputs
+    for candidate in (transcriptome, index, input_path, input_r1_path, input_r2_path):
+        if candidate is not None and not candidate.exists():
+            if args.json:
+                print(json.dumps({"error": "file_not_found", "path": str(candidate)}, ensure_ascii=False))
+            else:
+                console_err.print(t("seq_file_not_found", path=str(candidate)), style="bold red")
+            return EXIT_ARGUMENT_ERROR
+
+    threads = int(params["threads"])
+    library_type = str(params["library_type"])
+    if threads <= 0:
+        if args.json:
+            print(json.dumps({"error": "invalid_threads", "threads": threads}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: threads must be positive (got {threads})", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+    if not library_type.strip():
+        if args.json:
+            print(_json_error_payload("invalid_library_type"))
+        else:
+            console_err.print("Error: library-type must be non-empty", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    outdir = Path(str(params["outdir"])) if params["outdir"] else None
+    execution = build_execution_context(params, source="cli_or_config")
+    try:
+        result = run_rnaseq_pipeline(
+            transcriptome,
+            input_path,
+            index=index,
+            input_r1=input_r1_path,
+            input_r2=input_r2_path,
+            outdir=outdir,
+            threads=threads,
+            library_type=library_type,
+            sample_id=str(params["sample_id"]) if params["sample_id"] else None,
+            group=str(params["group"]) if params["group"] else None,
+            condition=str(params["condition"]) if params["condition"] else None,
+            resume=bool(params["resume"]),
+            execution=execution,
+            cli_mode=True,
+        )
+        if result is None:
+            anchor = input_path or input_r1_path
+            assert anchor is not None
+            metadata_path = (outdir or _default_workflow_outdir("rnaseq", anchor)) / "metadata.json"
+            _print_failure_diagnostics(metadata_path, as_json=args.json)
+            return EXIT_RUNTIME_ERROR
+        if args.json:
+            print(json.dumps({"status": "success", "execution": execution, **result}, ensure_ascii=False))
+        return EXIT_SUCCESS
+    except PreflightError as exc:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "error": "dependency_missing",
+                        "tools": exc.missing_tools,
+                        "backend": exc.backend,
+                        "reason": exc.reason,
+                        "missing_runtime": exc.missing_runtime,
+                        "conda_env": exc.conda_env,
+                        "container_image": exc.container_image,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        return EXIT_DEPENDENCY_MISSING
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"error": "runtime_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(t("error_unexpected", err=str(exc)), style="bold red")
+        return EXIT_RUNTIME_ERROR
+
+
 def cmd_project(args: argparse.Namespace) -> int:
     """处理 project 子命令：项目级多样本 workflow batch。"""
     config_path = _resolve_config_path(getattr(args, "config", None))
@@ -1082,6 +1220,30 @@ def main() -> int:
     parser_search.add_argument("--conda-env", dest="conda_env", help="Conda environment name for backend metadata")
     parser_search.add_argument("--container-image", dest="container_image", help="Container image name for backend metadata")
 
+    # rnaseq subcommand
+    parser_rnaseq = subparsers.add_parser("rnaseq", help="Run RNA-seq quantification (FastQC + Salmon)")
+    parser_rnaseq.add_argument("--config", help="YAML config file for rnaseq workflow")
+    reference_group = parser_rnaseq.add_mutually_exclusive_group()
+    reference_group.add_argument("--transcriptome", help="Transcriptome FASTA used to build a Salmon index")
+    reference_group.add_argument("--index", help="Existing Salmon index directory")
+    parser_rnaseq.add_argument("--input", "-i", help="Input single-end FASTQ file")
+    parser_rnaseq.add_argument("--input-r1", help="Input R1 FASTQ file for paired-end mode")
+    parser_rnaseq.add_argument("--input-r2", help="Input R2 FASTQ file for paired-end mode")
+    parser_rnaseq.add_argument("--outdir", help="Run output root directory (default: input_dir/rnaseq_run)")
+    parser_rnaseq.add_argument("--threads", "-t", type=int, help="Number of Salmon threads (default: 1)")
+    parser_rnaseq.add_argument("--library-type", dest="library_type", help="Salmon library type (default: A)")
+    parser_rnaseq.add_argument("--sample-id", dest="sample_id", help="Optional sample identifier")
+    parser_rnaseq.add_argument("--group", help="Optional experimental group")
+    parser_rnaseq.add_argument("--condition", help="Optional experimental condition")
+    parser_rnaseq.add_argument("--resume", action="store_true", help="Resume from the latest valid RNA-seq checkpoint")
+    parser_rnaseq.add_argument("--profile", help="Execution profile (default: local)")
+    parser_rnaseq.add_argument("--memory", help="Requested memory for execution metadata")
+    parser_rnaseq.add_argument("--queue", help="Requested queue/partition for execution metadata")
+    parser_rnaseq.add_argument("--time-limit", dest="time_limit", help="Requested walltime for execution metadata")
+    parser_rnaseq.add_argument("--backend", choices=["system", "conda", "container"], help="Execution backend (default: system)")
+    parser_rnaseq.add_argument("--conda-env", dest="conda_env", help="Conda environment name")
+    parser_rnaseq.add_argument("--container-image", dest="container_image", help="Container image name")
+
     # report 子命令
     parser_report = subparsers.add_parser("report", help="Generate HTML run report")
     parser_report.add_argument("--input", "-i", required=True, help="Run directory or parent directory containing runs")
@@ -1133,6 +1295,8 @@ def main() -> int:
         return cmd_align(args)
     elif args.command == "search":
         return cmd_search(args)
+    elif args.command == "rnaseq":
+        return cmd_rnaseq(args)
     elif args.command == "report":
         return cmd_report(args)
     elif args.command == "project":

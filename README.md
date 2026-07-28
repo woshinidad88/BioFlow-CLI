@@ -21,7 +21,7 @@ License text: [MIT License](LICENSE)
 
 - **Dual Mode**: Interactive TUI (`bioflow`) and script-friendly CLI (`bioflow ...`)
 - **i18n**: Full English/Chinese localization with persisted language preference
-- **Environment Manager**: Detect/install FastQC, SAMtools, BWA, BLAST+, Trimmomatic via Conda
+- **Environment Manager**: Detect/install FastQC, SAMtools, BWA, BLAST+, Trimmomatic, and Salmon via Conda
 - **Sequence Formatting**:
   - FASTA formatting with configurable line width
   - FASTQ formatting with auto-detection and quality summary (Avg Q / Q20 / Q30)
@@ -34,11 +34,15 @@ License text: [MIT License](LICENSE)
   - `makeblastdb` + `blastn` nucleotide search workflow
   - Tabular result output (`outfmt 6`) for downstream analysis
 - **QC Pipeline**: Integrated FastQC + Trimmomatic workflow for single-end and paired-end reads
+- **RNA-seq Quantification**:
+  - FastQC + Salmon mapping-based transcript quantification
+  - Single-end/paired-end reads, transcriptome index building, and prebuilt Salmon index reuse
+  - `quant.sf`, run summary JSON, mapping statistics, and sample design metadata
 - **Run Inspection**: `bioflow inspect` summarizes run status, critical outputs, failed steps, and log locations
 - **HTML Run Reports**: Export one or more workflow runs into a portable single-file HTML summary with success-rate cards, failure summaries, sample search/sort, workflow metrics, and structured JSON/TSV summaries
-- **Project Batch**: `bioflow project` executes mixed QC / alignment / search samples from one YAML file and emits project summaries plus a combined HTML report
+- **Project Batch**: `bioflow project` executes mixed QC / alignment / search / RNA-seq samples from one YAML file and emits project summaries plus a combined HTML report
 - **Failure Diagnostics**: Unified failure output across workflows with failed step, failed command, stderr tail, and direct log paths
-- **YAML Workflow Config**: run QC / alignment / search from reusable config files
+- **YAML Workflow Config**: run QC / alignment / search / RNA-seq from reusable config files
 - **Workflow Manifest**: built-in manifests describe workflow inputs, key outputs, supported profiles, and config schema validation
 - **Structured Output**: `--json` output for automation pipelines
 - **Stable Exit Codes**: standardized success/error/dependency signaling
@@ -139,6 +143,18 @@ bioflow search --config examples/search.yml
 # Run BLAST search with the container execution backend
 bioflow search --db ref.fa --query query.fa --profile local --backend container --container-image ghcr.io/biocael-dev/bioflow-cli:latest --threads 2 --memory 4G
 
+# Run paired-end RNA-seq and build a Salmon index from the transcriptome
+bioflow rnaseq --transcriptome transcripts.fa --input-r1 reads_1.fastq --input-r2 reads_2.fastq --outdir runs/rnaseq-001 --threads 8 --sample-id sample-a --group control --condition untreated
+
+# Run single-end RNA-seq with an existing Salmon index
+bioflow rnaseq --index salmon-index --input reads.fastq --outdir runs/rnaseq-002 --library-type A
+
+# Run RNA-seq from config
+bioflow rnaseq --config examples/rnaseq.yml
+
+# Resume an interrupted RNA-seq run
+bioflow rnaseq --transcriptome transcripts.fa --input reads.fastq --outdir runs/rnaseq-001 --resume
+
 # Run a mixed project batch from one YAML config
 bioflow project --config examples/project.yml
 
@@ -171,6 +187,7 @@ bioflow env --list
 
 # Install a tool
 bioflow env --install fastqc
+bioflow env --install salmon
 
 # JSON output for automation
 bioflow --json seq --input reads.fastq
@@ -204,13 +221,16 @@ bioflow --json batch -i ./data -o ./formatted
 - `bioflow qc --config qc.yml`
 - `bioflow align --config align.yml`
 - `bioflow search --config search.yml`
+- `bioflow rnaseq --config rnaseq.yml`
 - `bioflow project --config project.yml`
 - parameter precedence is: explicit CLI argument > YAML config > built-in default
-- `qc` and `align` support either `input` or the `input_r1` + `input_r2` pair
+- `qc`, `align`, and `rnaseq` support either `input` or the `input_r1` + `input_r2` pair
+- `rnaseq` requires exactly one Salmon reference source: `transcriptome` or `index`
+- RNA-seq design metadata accepts optional `sample_id`, `group`, and `condition`
 - `input` cannot be combined with `input_r1` / `input_r2`
 - workflow and project YAML files are validated against built-in workflow manifests before execution
 - manifest-based schema checks catch unknown fields, invalid types, non-positive numeric values, and workflow-specific missing fields early
-- `qc`, `align`, and `search` configs also support execution metadata fields: `profile`, `threads`, `memory`, `queue`, `time_limit`, `backend`, `conda_env`, and `container_image`
+- `qc`, `align`, `search`, and `rnaseq` configs also support execution metadata fields: `profile`, `threads`, `memory`, `queue`, `time_limit`, `backend`, `conda_env`, and `container_image`
 - `project` config uses a top-level `project:` section optionally, and supports `outdir`, `continue_on_error`, `report_title`, `profile`, `threads`, `memory`, `queue`, `time_limit`, `backend`, `conda_env`, `container_image`, and `samples`
 - each `samples` item requires `sample_id`, `workflow`, and that workflow's normal required fields
 - project-level execution fields are inherited by samples unless a sample overrides them
@@ -219,8 +239,8 @@ bioflow --json batch -i ./data -o ./formatted
 
 ### Workflow Output Layout
 
-- `qc`, `align`, and `search` now share a standard run directory layout
-- set `--outdir` to control the run root; if omitted, BioFlow-CLI creates `qc_run`, `align_run`, or `search_run` beside the input file
+- `qc`, `align`, `search`, and `rnaseq` share a standard run directory layout
+- set `--outdir` to control the run root; if omitted, BioFlow-CLI creates `qc_run`, `align_run`, `search_run`, or `rnaseq_run` beside the input file
 - each run contains `logs/`, `results/`, `tmp/`, and `metadata.json`
 - `bioflow project` creates one project root with per-sample run directories such as `001-sample-qc-qc`
 - each project run also writes `project_summary.json`, `summary.json`, `summary.tsv`, and `project_report.html`
@@ -229,11 +249,12 @@ bioflow --json batch -i ./data -o ./formatted
 - each workflow step now records its backend, raw command, resolved command, and environment fingerprint
 - paired-end `qc` metadata also records `trimmed_r1`, `trimmed_r2`, `unpaired_r1`, and `unpaired_r2`
 - paired-end `align` metadata records `input_r1`, `input_r2`, `bam`, `bai`, and paired flagstat metrics
+- `rnaseq` metadata records sample design fields, FastQC/Salmon steps, `quant.sf`, Salmon meta information, mapping metrics, and transcript abundance summaries
 - on failure, diagnostic stdout/stderr logs are retained under `logs/`
 
 ### Resume And Checkpoints
 
-- `bioflow qc --resume`, `bioflow align --resume`, and `bioflow search --resume` resume from the latest valid workflow checkpoint
+- `bioflow qc --resume`, `bioflow align --resume`, `bioflow search --resume`, and `bioflow rnaseq --resume` resume from the latest valid workflow checkpoint
 - completed steps are reused automatically when their key outputs remain valid
 - resume validation also checks metadata step status and required output descriptors before reusing a checkpoint
 - resume also compares the execution fingerprint; changing profile, backend, environment, or requested resources forces recomputation
@@ -256,7 +277,7 @@ bioflow --json batch -i ./data -o ./formatted
 
 ### Failure Diagnostics
 
-- failed `qc`, `align`, and `search` runs now print a unified CLI diagnostic block
+- failed `qc`, `align`, `search`, and `rnaseq` runs print a unified CLI diagnostic block
 - the block includes failed step, failed command, stdout log path, stderr log path, and stderr tail
 - backend-aware preflight now distinguishes missing tools from missing conda runtime, missing conda env, or missing container runtime/image
 - the same diagnostics are persisted in `metadata.json` under `failure_details`
@@ -270,6 +291,7 @@ bioflow --json batch -i ./data -o ./formatted
 - QC reports summarize trimmed outputs and FastQC result directories
 - alignment reports summarize BAM / BAI / flagstat outputs and key mapping metrics
 - search reports summarize TSV / summary outputs, hit count, and best hit
+- RNA-seq reports summarize `quant.sf`, Salmon metadata, mapping rate, mapped fragments, and expressed transcripts
 - TUI mode also exposes report export from the main menu
 
 ### Batch Concurrency
@@ -296,7 +318,7 @@ pip install -e .[dev]
 
 ## Project Status
 
-Current development version: **v0.9.2**
+Current development version: **v1.0.0**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

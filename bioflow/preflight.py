@@ -18,6 +18,7 @@ TOOL_REGISTRY: dict[str, tuple[str, str]] = {
     "bwa": ("bwa", "conda install -y -c bioconda bwa"),
     "makeblastdb": ("makeblastdb", "conda install -y -c bioconda blast"),
     "blastn": ("blastn", "conda install -y -c bioconda blast"),
+    "salmon": ("salmon", "conda install -y -c bioconda salmon"),
 }
 
 
@@ -90,9 +91,13 @@ def preflight_check(
     missing_runtime: str | None = None
     reason = "missing_tools"
 
-    for tool_name in tools:
-        if not check_tool(tool_name):
-            missing.append(tool_name)
+    # Host PATH is authoritative only for the system backend. Conda and
+    # container tools live inside their execution environment and are
+    # validated when the resolved command runs.
+    if backend == "system":
+        for tool_name in tools:
+            if not check_tool(tool_name):
+                missing.append(tool_name)
 
     if backend == "conda":
         if not _check_conda():
