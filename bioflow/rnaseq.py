@@ -136,6 +136,55 @@ def _validate_reference(transcriptome: Path | None, index: Path | None) -> None:
         raise ValueError("rnaseq requires transcriptome or index")
 
 
+def _validate_design(
+    *,
+    group: str | None,
+    condition: str | None,
+    lane: str | None,
+    replicate: int | None,
+) -> None:
+    """Validate optional sample-design fields used by direct and project runs."""
+    if group is not None and not group.strip():
+        raise ValueError("rnaseq group must be non-empty")
+    if condition is not None and not condition.strip():
+        raise ValueError("rnaseq condition must be non-empty")
+    has_group = group is not None and bool(group.strip())
+    has_condition = condition is not None and bool(condition.strip())
+    if has_group != has_condition:
+        raise ValueError("rnaseq requires group and condition together")
+    if lane is not None and not lane.strip():
+        raise ValueError("rnaseq lane must be non-empty")
+    if replicate is not None and replicate <= 0:
+        raise ValueError("rnaseq replicate must be positive")
+
+
+def _summary_matches_design(
+    path: Path,
+    *,
+    sample_id: str | None,
+    group: str | None,
+    condition: str | None,
+    lane: str | None,
+    replicate: int | None,
+    library_type: str,
+    input_mode: str,
+) -> bool:
+    """Return whether a reusable summary matches the current sample design."""
+    if not _summary_ready(path):
+        return False
+    payload = _read_json(path)
+    expected = {
+        "sample_id": sample_id,
+        "group": group,
+        "condition": condition,
+        "lane": lane,
+        "replicate": replicate,
+        "library_type": library_type,
+        "input_mode": input_mode,
+    }
+    return all(payload.get(key) == value for key, value in expected.items())
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -150,6 +199,8 @@ def summarize_salmon_quant(
     sample_id: str | None = None,
     group: str | None = None,
     condition: str | None = None,
+    lane: str | None = None,
+    replicate: int | None = None,
     library_type: str = "A",
     input_mode: str,
 ) -> dict[str, Any]:
@@ -187,6 +238,8 @@ def summarize_salmon_quant(
         "sample_id": sample_id,
         "group": group,
         "condition": condition,
+        "lane": lane,
+        "replicate": replicate,
         "input_mode": input_mode,
         "library_type": library_type,
         "inferred_library_type": meta.get("library_types"),
@@ -232,6 +285,8 @@ def run_rnaseq_pipeline(
     sample_id: str | None = None,
     group: str | None = None,
     condition: str | None = None,
+    lane: str | None = None,
+    replicate: int | None = None,
     resume: bool = False,
     execution: dict[str, object] | None = None,
     cli_mode: bool = False,
@@ -240,6 +295,12 @@ def run_rnaseq_pipeline(
     """Run FastQC and Salmon mapping-based transcript quantification."""
     paired_mode, anchor = _validate_inputs(input_file, input_r1, input_r2)
     _validate_reference(transcriptome, index)
+    _validate_design(
+        group=group,
+        condition=condition,
+        lane=lane,
+        replicate=replicate,
+    )
     if threads <= 0:
         raise ValueError("threads must be positive")
     if not library_type.strip():
@@ -323,6 +384,8 @@ def run_rnaseq_pipeline(
             "sample_id": sample_id,
             "group": group,
             "condition": condition,
+            "lane": lane,
+            "replicate": replicate,
             "resume": resume,
             "execution": execution_payload,
         }
@@ -628,7 +691,16 @@ def run_rnaseq_pipeline(
     if resume and step_resume_ready(
         existing_metadata,
         RNASEQ_STEP_SUMMARY,
-        validator=lambda: _summary_ready(summary_path),
+        validator=lambda: _summary_matches_design(
+            summary_path,
+            sample_id=sample_id,
+            group=group,
+            condition=condition,
+            lane=lane,
+            replicate=replicate,
+            library_type=library_type,
+            input_mode="paired-end" if paired_mode else "single-end",
+        ),
         required_outputs=("summary",),
         current_execution=execution_payload,
     ):
@@ -649,6 +721,8 @@ def run_rnaseq_pipeline(
                 sample_id=sample_id,
                 group=group,
                 condition=condition,
+                lane=lane,
+                replicate=replicate,
                 library_type=library_type,
                 input_mode="paired-end" if paired_mode else "single-end",
             )

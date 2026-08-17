@@ -157,7 +157,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
 h1{color:#2c3e50;margin-bottom:.5rem}
 h2{font-size:1rem;color:#2c3e50;margin-bottom:.75rem}
 .subtitle{color:#7f8c8d;margin-bottom:2rem;font-size:.9rem}
-.overview,.workflow-summary{background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:1.25rem;margin-bottom:1.5rem;
+.overview,.workflow-summary,.project-rnaseq{background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:1.25rem;margin-bottom:1.5rem;
           box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:.75rem;margin-bottom:1rem}
 .stat-card{border:1px solid #e5e7eb;border-radius:8px;padding:.9rem;background:#fbfcfd}
@@ -182,6 +182,9 @@ h2{font-size:1rem;color:#2c3e50;margin-bottom:.75rem}
 .metric-list span:last-child{font-weight:600;color:#1f2937;text-align:right}
 .failure-list{display:grid;gap:.4rem;font-size:.86rem}
 .failure-item{border-left:3px solid #e74c3c;padding:.35rem .5rem;background:#fff}
+.warning-item{border-left:3px solid #f39c12;padding:.35rem .5rem;background:#fff8eb;margin-top:.4rem}
+.artifact-list{display:flex;flex-wrap:wrap;gap:.6rem;margin:.6rem 0}
+.artifact-link{display:inline-flex;border:1px solid #0f766e;border-radius:6px;color:#0f766e;text-decoration:none;padding:.4rem .65rem;font-size:.86rem}
 .empty-note{color:#6b7280;font-size:.86rem}
 .nav-list{display:flex;flex-wrap:wrap;gap:.5rem}
 .run-card{background:#fff;border:1px solid #e1e4e8;border-radius:8px;
@@ -727,6 +730,85 @@ def _render_workflow_summaries(runs: list[RunInfo]) -> str:
     )
 
 
+def _render_project_artifact(path_value: Any, label: str) -> str:
+    """Render a project artifact as a report-relative link."""
+    if not path_value:
+        return ""
+    path = Path(str(path_value))
+    return f'<a class="artifact-link" href="{_esc(path.name)}">{_esc(label)} · {_esc(path.name)}</a>'
+
+
+def _render_project_rnaseq(project_summary: dict[str, Any]) -> str:
+    """Render project-level RNA-seq design, matrices, and missing-result notices."""
+    rnaseq = project_summary.get("rnaseq", {})
+    if not isinstance(rnaseq, dict) or not rnaseq:
+        return ""
+
+    metric_rows = {
+        t("report_metric_rnaseq_planned"): rnaseq.get("planned_sample_count", 0),
+        t("report_metric_rnaseq_successful"): rnaseq.get("successful_sample_count", 0),
+        t("report_metric_rnaseq_matrix_samples"): rnaseq.get("matrix_sample_count", 0),
+        t("report_metric_rnaseq_transcripts"): rnaseq.get("transcript_count", 0),
+    }
+    design_counts = rnaseq.get("design_counts", [])
+    design_rows: list[str] = []
+    if isinstance(design_counts, list):
+        for item in design_counts:
+            if not isinstance(item, dict):
+                continue
+            design_rows.append(
+                "<tr>"
+                f'<td>{_esc(item.get("group") or "-")}</td>'
+                f'<td>{_esc(item.get("condition") or "-")}</td>'
+                f'<td>{_esc(item.get("sample_count", 0))}</td>'
+                "</tr>"
+            )
+    design_table = (
+        "<table>"
+        f'<tr><th>{_esc(t("report_design_group"))}</th>'
+        f'<th>{_esc(t("report_design_condition"))}</th>'
+        f'<th>{_esc(t("report_design_samples"))}</th></tr>'
+        f'{"".join(design_rows)}</table>'
+        if design_rows
+        else f'<p class="empty-note">{_esc(t("report_empty_value"))}</p>'
+    )
+
+    artifacts = "".join(
+        (
+            _render_project_artifact(rnaseq.get("counts_matrix"), t("report_artifact_counts_matrix")),
+            _render_project_artifact(rnaseq.get("tpm_matrix"), t("report_artifact_tpm_matrix")),
+            _render_project_artifact(rnaseq.get("sample_metadata"), t("report_artifact_sample_metadata")),
+        )
+    )
+    warnings: list[str] = []
+    for key, label in (
+        ("failed_samples", t("report_rnaseq_failed_samples")),
+        ("missing_quant_samples", t("report_rnaseq_missing_quant")),
+        ("not_run_samples", t("report_rnaseq_not_run")),
+    ):
+        values = rnaseq.get(key, [])
+        if isinstance(values, list) and values:
+            warnings.append(
+                f'<div class="warning-item"><strong>{_esc(label)}:</strong> '
+                f'{_esc(", ".join(str(value) for value in values))}</div>'
+            )
+
+    return "\n".join(
+        [
+            '<section class="project-rnaseq">',
+            f'<h2>{_esc(t("report_section_rnaseq_project"))}</h2>',
+            '<div class="overview-grid">',
+            f'<div class="overview-panel"><h2>{_esc(t("report_section_rnaseq_metrics"))}</h2>{_render_metric_list(metric_rows)}</div>',
+            f'<div class="overview-panel"><h2>{_esc(t("report_section_sample_design"))}</h2>{design_table}</div>',
+            "</div>",
+            f'<div class="section-title">{_esc(t("report_section_matrix_exports"))}</div>',
+            f'<div class="artifact-list">{artifacts or _esc(t("report_empty_value"))}</div>',
+            "".join(warnings),
+            "</section>",
+        ]
+    )
+
+
 def _render_overview(overview: ReportOverview, runs: list[RunInfo]) -> str:
     """Render report overview cards, workflow matrix, filters, and navigation."""
     workflows = sorted(overview.workflow_counts)
@@ -875,6 +957,9 @@ def _render_run_card(run: RunInfo, index: int) -> str:
 class DefaultHTMLTemplate:
     """Built-in HTML report template."""
 
+    def __init__(self, project_summary: dict[str, Any] | None = None) -> None:
+        self.project_summary = project_summary or {}
+
     def render(self, runs: list[RunInfo], title: str) -> str:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         overview = _build_overview(runs)
@@ -892,6 +977,7 @@ class DefaultHTMLTemplate:
             f"<h1>{_esc(title)}</h1>\n"
             f'<p class="subtitle">{_esc(subtitle)}</p>\n'
             f"{_render_overview(overview, runs)}\n"
+            f"{_render_project_rnaseq(self.project_summary)}\n"
             f"{_render_workflow_summaries(runs)}\n"
             f'<section data-run-list>{cards}</section>\n'
             f'<footer>Generated by BioFlow-CLI v{__version__}</footer>\n'
@@ -965,6 +1051,17 @@ def report_menu() -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _load_project_summary(input_path: Path) -> dict[str, Any]:
+    """Read optional project_summary.json for project-level report sections."""
+    summary_path = input_path / "project_summary.json"
+    if not summary_path.is_file():
+        return {}
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
 def generate_report(
     input_path: Path,
     output_path: Path,
@@ -1001,7 +1098,7 @@ def generate_report(
         raise FileNotFoundError(t("report_no_runs", path=str(input_path)))
 
     effective_title = title or t("report_default_title")
-    tmpl = template or DefaultHTMLTemplate()
+    tmpl = template or DefaultHTMLTemplate(project_summary=_load_project_summary(input_path))
     html = tmpl.render(runs, effective_title)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

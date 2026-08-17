@@ -6,6 +6,8 @@ rnaseq:
   sample_id: sample-rnaseq
   group: control
   condition: untreated
+  lane: L001
+  replicate: 1
   library_type: A
   profile: workstation
   backend: conda

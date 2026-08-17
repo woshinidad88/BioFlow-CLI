@@ -146,6 +146,14 @@ def _validate_rnaseq_reference(
         raise ConfigError(f"{context} requires 'transcriptome' or 'index'")
 
 
+def _validate_rnaseq_design(data: dict[str, Any], *, context: str) -> None:
+    """Validate the optional RNA-seq experimental-design fields."""
+    has_group = bool(data.get("group"))
+    has_condition = bool(data.get("condition"))
+    if has_group != has_condition:
+        raise ConfigError(f"{context} requires 'group' and 'condition' together")
+
+
 def _read_yaml_mapping(config_path: Path) -> dict[str, Any]:
     """读取 YAML 并保证顶层是 mapping。"""
     if not config_path.exists():
@@ -198,6 +206,7 @@ def load_workflow_config(config_path: Path, workflow: str) -> dict[str, Any]:
         _validate_single_or_paired_inputs(data, workflow, context=f"{workflow} config")
     if workflow == "rnaseq":
         _validate_rnaseq_reference(data, context="rnaseq config")
+        _validate_rnaseq_design(data, context="rnaseq config")
     _validate_manifest_fields(data, workflow, context=f"{workflow} config")
     _validate_execution_options(data, context=f"{workflow} config")
 
@@ -275,6 +284,7 @@ def load_project_config(config_path: Path) -> dict[str, Any]:
                 context=f"Project sample '{sample_id}'",
                 require_reference=True,
             )
+            _validate_rnaseq_design(item, context=f"Project sample '{sample_id}'")
         manifest = get_workflow_manifest(workflow)
         required_fields = tuple(
             key
@@ -287,6 +297,14 @@ def load_project_config(config_path: Path) -> dict[str, Any]:
                 raise ConfigError(f"Project sample '{sample_id}' requires non-empty {field}")
 
         validated_samples.append(dict(item))
+
+    rnaseq_samples = [item for item in validated_samples if item.get("workflow") == "rnaseq"]
+    if rnaseq_samples:
+        designed = [bool(item.get("group") and item.get("condition")) for item in rnaseq_samples]
+        if any(designed) and not all(designed):
+            raise ConfigError(
+                "RNA-seq project design requires 'group' and 'condition' for every RNA-seq sample"
+            )
 
     return {
         "outdir": data.get("outdir"),

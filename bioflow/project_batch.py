@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import json
+import math
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +31,19 @@ from bioflow.rnaseq import run_rnaseq_pipeline
 from bioflow.search import run_blast_search
 
 console = Console(stderr=True)
+
+RNASEQ_SAMPLE_METADATA_COLUMNS = (
+    "sample_id",
+    "group",
+    "condition",
+    "lane",
+    "replicate",
+    "status",
+    "run_dir",
+    "quant_sf",
+    "included_in_matrix",
+    "error",
+)
 
 
 @dataclass
@@ -174,6 +190,8 @@ def _run_project_job(run_dir: Path, sample: dict[str, Any]) -> ProjectJobResult:
                 sample_id=sample_id,
                 group=str(sample["group"]) if sample.get("group") else None,
                 condition=str(sample["condition"]) if sample.get("condition") else None,
+                lane=str(sample["lane"]) if sample.get("lane") else None,
+                replicate=int(sample["replicate"]) if sample.get("replicate") is not None else None,
                 resume=bool(sample.get("resume", False)),
                 execution=execution,
                 cli_mode=True,
@@ -206,6 +224,199 @@ def _run_project_job(run_dir: Path, sample: dict[str, Any]) -> ProjectJobResult:
     )
 
 
+def _read_salmon_quant(quant_path: Path) -> dict[str, tuple[float, float]]:
+    """Read transcript NumReads and TPM values from one Salmon quant.sf."""
+    values: dict[str, tuple[float, float]] = {}
+    with quant_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        required = {"Name", "TPM", "NumReads"}
+        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+            raise ValueError("invalid Salmon quant.sf header")
+        for row in reader:
+            transcript_id = str(row["Name"]).strip()
+            if not transcript_id:
+                raise ValueError("Salmon quant.sf contains an empty transcript id")
+            if transcript_id in values:
+                raise ValueError(f"duplicate transcript id in Salmon quant.sf: {transcript_id}")
+            num_reads = float(row["NumReads"])
+            tpm = float(row["TPM"])
+            if not math.isfinite(num_reads) or not math.isfinite(tpm) or num_reads < 0 or tpm < 0:
+                raise ValueError(f"invalid Salmon abundance value for transcript: {transcript_id}")
+            values[transcript_id] = (num_reads, tpm)
+    if not values:
+        raise ValueError("Salmon quant.sf contains no transcript rows")
+    return values
+
+
+def _matrix_number(value: float) -> str:
+    """Format matrix numbers compactly without losing useful precision."""
+    if value.is_integer():
+        return str(int(value))
+    return format(value, ".10g")
+
+
+def _write_rnaseq_matrix(
+    output_path: Path,
+    *,
+    sample_ids: list[str],
+    transcript_ids: list[str],
+    quant_values: dict[str, dict[str, tuple[float, float]]],
+    value_index: int,
+) -> Path:
+    """Write one transcript-by-sample RNA-seq matrix."""
+    with output_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, dialect="excel-tab", lineterminator="\n")
+        writer.writerow(["transcript_id", *sample_ids])
+        for transcript_id in transcript_ids:
+            writer.writerow(
+                [
+                    transcript_id,
+                    *[
+                        _matrix_number(quant_values[sample_id].get(transcript_id, (0.0, 0.0))[value_index])
+                        for sample_id in sample_ids
+                    ],
+                ]
+            )
+    return output_path
+
+
+def _write_rnaseq_project_exports(
+    project_root: Path,
+    *,
+    planned_samples: list[dict[str, Any]],
+    results: list[ProjectJobResult],
+) -> dict[str, Any]:
+    """Create project-level RNA-seq matrices, design metadata, and diagnostics."""
+    rnaseq_samples = [sample for sample in planned_samples if sample.get("workflow") == "rnaseq"]
+    if not rnaseq_samples:
+        return {}
+
+    counts_matrix_target = project_root / "counts_matrix.tsv"
+    tpm_matrix_target = project_root / "tpm_matrix.tsv"
+    for stale_matrix in (counts_matrix_target, tpm_matrix_target):
+        stale_matrix.unlink(missing_ok=True)
+
+    results_by_sample = {result.sample_id: result for result in results if result.workflow == "rnaseq"}
+    quant_values: dict[str, dict[str, tuple[float, float]]] = {}
+    quant_paths: dict[str, Path] = {}
+    failed_samples: list[str] = []
+    missing_quant_samples: list[str] = []
+    not_run_samples: list[str] = []
+    sample_errors: dict[str, str] = {}
+
+    for sample in rnaseq_samples:
+        sample_id = str(sample["sample_id"])
+        result = results_by_sample.get(sample_id)
+        if result is None:
+            not_run_samples.append(sample_id)
+            sample_errors[sample_id] = "sample was not run"
+            continue
+        if result.status != "success":
+            failed_samples.append(sample_id)
+            sample_errors[sample_id] = result.error or f"run status: {result.status}"
+            continue
+
+        quant_raw = result.outputs.get("quant_sf")
+        quant_path = Path(str(quant_raw)) if quant_raw else result.run_dir / "results" / "salmon_quant" / "quant.sf"
+        quant_paths[sample_id] = quant_path
+        if not quant_path.is_file():
+            missing_quant_samples.append(sample_id)
+            sample_errors[sample_id] = f"quant.sf not found: {quant_path}"
+            continue
+        try:
+            quant_values[sample_id] = _read_salmon_quant(quant_path)
+        except (OSError, TypeError, ValueError) as exc:
+            missing_quant_samples.append(sample_id)
+            sample_errors[sample_id] = str(exc)
+
+    matrix_sample_ids = [
+        str(sample["sample_id"])
+        for sample in rnaseq_samples
+        if str(sample["sample_id"]) in quant_values
+    ]
+    transcript_ids = sorted(
+        {transcript_id for sample_values in quant_values.values() for transcript_id in sample_values}
+    )
+
+    counts_matrix_path: Path | None = None
+    tpm_matrix_path: Path | None = None
+    if matrix_sample_ids:
+        counts_matrix_path = _write_rnaseq_matrix(
+            counts_matrix_target,
+            sample_ids=matrix_sample_ids,
+            transcript_ids=transcript_ids,
+            quant_values=quant_values,
+            value_index=0,
+        )
+        tpm_matrix_path = _write_rnaseq_matrix(
+            tpm_matrix_target,
+            sample_ids=matrix_sample_ids,
+            transcript_ids=transcript_ids,
+            quant_values=quant_values,
+            value_index=1,
+        )
+
+    sample_metadata_path = project_root / "sample_metadata.tsv"
+    with sample_metadata_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=RNASEQ_SAMPLE_METADATA_COLUMNS,
+            dialect="excel-tab",
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        for sample in rnaseq_samples:
+            sample_id = str(sample["sample_id"])
+            result = results_by_sample.get(sample_id)
+            writer.writerow(
+                {
+                    "sample_id": sample_id,
+                    "group": sample.get("group", ""),
+                    "condition": sample.get("condition", ""),
+                    "lane": sample.get("lane", ""),
+                    "replicate": sample.get("replicate", ""),
+                    "status": result.status if result is not None else "not_run",
+                    "run_dir": str(result.run_dir) if result is not None else "",
+                    "quant_sf": str(quant_paths.get(sample_id, "")),
+                    "included_in_matrix": sample_id in quant_values,
+                    "error": sample_errors.get(sample_id, ""),
+                }
+            )
+
+    group_counts = Counter(str(sample["group"]) for sample in rnaseq_samples if sample.get("group"))
+    condition_counts = Counter(
+        str(sample["condition"]) for sample in rnaseq_samples if sample.get("condition")
+    )
+    design_counts: Counter[tuple[str, str]] = Counter(
+        (str(sample.get("group", "")), str(sample.get("condition", "")))
+        for sample in rnaseq_samples
+    )
+    return {
+        "planned_sample_count": len(rnaseq_samples),
+        "successful_sample_count": sum(
+            1
+            for sample in rnaseq_samples
+            if (result := results_by_sample.get(str(sample["sample_id"]))) is not None
+            and result.status == "success"
+        ),
+        "matrix_sample_count": len(matrix_sample_ids),
+        "transcript_count": len(transcript_ids),
+        "matrix_samples": matrix_sample_ids,
+        "failed_samples": failed_samples,
+        "missing_quant_samples": missing_quant_samples,
+        "not_run_samples": not_run_samples,
+        "group_counts": dict(sorted(group_counts.items())),
+        "condition_counts": dict(sorted(condition_counts.items())),
+        "design_counts": [
+            {"group": group, "condition": condition, "sample_count": count}
+            for (group, condition), count in sorted(design_counts.items())
+        ],
+        "counts_matrix": str(counts_matrix_path) if counts_matrix_path is not None else "",
+        "tpm_matrix": str(tpm_matrix_path) if tpm_matrix_path is not None else "",
+        "sample_metadata": str(sample_metadata_path),
+    }
+
+
 def _write_project_summary(
     project_root: Path,
     *,
@@ -217,6 +428,7 @@ def _write_project_summary(
     planned_sample_count: int,
     summary_json_path: Path | None = None,
     summary_tsv_path: Path | None = None,
+    rnaseq: dict[str, Any] | None = None,
 ) -> Path:
     """写入项目级汇总 JSON。"""
     success_count = sum(1 for item in samples if item.status == "success")
@@ -245,6 +457,7 @@ def _write_project_summary(
             workflow: sum(1 for item in samples if item.workflow == workflow)
             for workflow in sorted({item.workflow for item in samples})
         },
+        "rnaseq": rnaseq or {},
     }
     summary_path = project_root / "project_summary.json"
     summary_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -308,6 +521,21 @@ def run_project_batch(
         if result.status != "success" and not continue_on_error:
             break
 
+    rnaseq_exports = _write_rnaseq_project_exports(
+        project_root,
+        planned_samples=project_config["samples"],
+        results=results,
+    )
+    _write_project_summary(
+        project_root,
+        samples=results,
+        started_at=started_at,
+        completed_at=utc_now_iso(),
+        continue_on_error=continue_on_error,
+        planned_sample_count=planned_sample_count,
+        rnaseq=rnaseq_exports,
+    )
+
     report_path: Path | None = None
     if any(item.run_dir.is_dir() and item.metadata_path.exists() for item in results):
         report_path = generate_report(
@@ -351,6 +579,7 @@ def run_project_batch(
         planned_sample_count=planned_sample_count,
         summary_json_path=summary_json_path,
         summary_tsv_path=summary_tsv_path,
+        rnaseq=rnaseq_exports,
     )
 
     success_count = sum(1 for item in results if item.status == "success")
@@ -370,5 +599,6 @@ def run_project_batch(
         "success_count": success_count,
         "failed_count": failed_count,
         "continue_on_error": continue_on_error,
+        "rnaseq": rnaseq_exports,
         "samples": [item.as_dict() for item in results],
     }

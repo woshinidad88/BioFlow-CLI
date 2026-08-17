@@ -41,4 +41,5 @@ def test_checked_in_examples_match_manifest_schemas() -> None:
         "align",
         "search",
         "rnaseq",
+        "rnaseq",
     ]

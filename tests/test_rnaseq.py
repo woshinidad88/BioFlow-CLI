@@ -63,11 +63,15 @@ def test_summarize_salmon_quant_reads_standard_outputs(tmp_path: Path) -> None:
         sample_id="sample-a",
         group="control",
         condition="untreated",
+        lane="L001",
+        replicate=1,
         library_type="A",
         input_mode="paired-end",
     )
 
     assert summary["sample_id"] == "sample-a"
+    assert summary["lane"] == "L001"
+    assert summary["replicate"] == 1
     assert summary["mapping_rate"] == 0.8
     assert summary["transcript_count"] == 3
     assert summary["expressed_transcripts"] == 2
@@ -109,6 +113,8 @@ def test_run_rnaseq_pipeline_writes_metadata_and_supports_resume(
         sample_id="sample-a",
         group="control",
         condition="untreated",
+        lane="L001",
+        replicate=1,
         execution=execution,
         skip_preflight=True,
         cli_mode=True,
@@ -120,6 +126,8 @@ def test_run_rnaseq_pipeline_writes_metadata_and_supports_resume(
     assert metadata["workflow"] == "rnaseq"
     assert metadata["status"] == "success"
     assert metadata["parameters"]["sample_id"] == "sample-a"
+    assert metadata["parameters"]["lane"] == "L001"
+    assert metadata["summary"]["replicate"] == 1
     assert metadata["stats"]["mapping_rate"] == 0.8
     assert metadata["summary"]["condition"] == "untreated"
     assert metadata["steps"]["fastqc"]["status"] == "success"
@@ -139,6 +147,8 @@ def test_run_rnaseq_pipeline_writes_metadata_and_supports_resume(
         sample_id="sample-a",
         group="control",
         condition="untreated",
+        lane="L001",
+        replicate=1,
         resume=True,
         execution=execution,
         skip_preflight=True,
@@ -148,6 +158,27 @@ def test_run_rnaseq_pipeline_writes_metadata_and_supports_resume(
     assert calls == []
     metadata = json.loads((outdir / "metadata.json").read_text(encoding="utf-8"))
     assert all(step["status"] == "skipped" for step in metadata["steps"].values())
+
+    changed_design = rnaseq.run_rnaseq_pipeline(
+        transcriptome,
+        reads,
+        outdir=outdir,
+        threads=4,
+        sample_id="sample-a",
+        group="control",
+        condition="untreated",
+        lane="L002",
+        replicate=1,
+        resume=True,
+        execution=execution,
+        skip_preflight=True,
+        cli_mode=True,
+    )
+    assert changed_design is not None
+    assert calls == []
+    metadata = json.loads((outdir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["summary"]["lane"] == "L002"
+    assert metadata["steps"]["summary"]["status"] == "success"
 
 
 def test_run_rnaseq_pipeline_uses_prebuilt_index_and_paired_reads(
@@ -239,6 +270,8 @@ def test_rnaseq_workflow_and_project_schema_validation(tmp_path: Path) -> None:
                 "  threads: 4",
                 "  group: control",
                 "  condition: untreated",
+                "  lane: L001",
+                "  replicate: 1",
             ]
         ),
         encoding="utf-8",
@@ -257,13 +290,84 @@ def test_rnaseq_workflow_and_project_schema_validation(tmp_path: Path) -> None:
                 "      workflow: rnaseq",
                 "      index: salmon-index",
                 "      input: reads.fastq",
+                "      group: control",
                 "      condition: untreated",
+                "      lane: L001",
+                "      replicate: 1",
             ]
         ),
         encoding="utf-8",
     )
     project = load_project_config(project_path)
     assert project["samples"][0]["workflow"] == "rnaseq"
+    assert project["samples"][0]["lane"] == "L001"
+    assert project["samples"][0]["replicate"] == 1
+
+
+def test_rnaseq_schema_rejects_incomplete_design_and_invalid_replicate(tmp_path: Path) -> None:
+    incomplete_path = tmp_path / "incomplete.yml"
+    incomplete_path.write_text(
+        "\n".join(
+            [
+                "rnaseq:",
+                "  index: salmon-index",
+                "  input: reads.fastq",
+                "  group: control",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        load_workflow_config(incomplete_path, "rnaseq")
+    except ConfigError as exc:
+        assert "requires 'group' and 'condition' together" in str(exc)
+    else:
+        raise AssertionError("expected ConfigError")
+
+    inconsistent_project_path = tmp_path / "inconsistent-project.yml"
+    inconsistent_project_path.write_text(
+        "\n".join(
+            [
+                "samples:",
+                "  - sample_id: sample-a",
+                "    workflow: rnaseq",
+                "    index: salmon-index",
+                "    input: reads-a.fastq",
+                "    group: control",
+                "    condition: untreated",
+                "  - sample_id: sample-b",
+                "    workflow: rnaseq",
+                "    index: salmon-index",
+                "    input: reads-b.fastq",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        load_project_config(inconsistent_project_path)
+    except ConfigError as exc:
+        assert "for every RNA-seq sample" in str(exc)
+    else:
+        raise AssertionError("expected ConfigError")
+
+    invalid_replicate_path = tmp_path / "invalid-replicate.yml"
+    invalid_replicate_path.write_text(
+        "\n".join(
+            [
+                "rnaseq:",
+                "  index: salmon-index",
+                "  input: reads.fastq",
+                "  replicate: 0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        load_workflow_config(invalid_replicate_path, "rnaseq")
+    except ConfigError as exc:
+        assert "'replicate' must be positive" in str(exc)
+    else:
+        raise AssertionError("expected ConfigError")
 
 
 def test_rnaseq_project_schema_requires_reference(tmp_path: Path) -> None:
@@ -315,6 +419,8 @@ def test_cmd_rnaseq_json_outputs_result(tmp_path: Path, monkeypatch, capsys) -> 
         sample_id="sample-a",
         group="control",
         condition="untreated",
+        lane="L001",
+        replicate=1,
         resume=False,
         profile="local",
         memory=None,
@@ -363,6 +469,9 @@ def test_project_job_dispatches_rnaseq(tmp_path: Path, monkeypatch) -> None:
             "index": str(tmp_path / "index"),
             "input": str(tmp_path / "reads.fastq"),
             "condition": "treated",
+            "group": "treatment",
+            "lane": "L002",
+            "replicate": 2,
             "threads": 8,
         },
     )
@@ -370,6 +479,9 @@ def test_project_job_dispatches_rnaseq(tmp_path: Path, monkeypatch) -> None:
     assert result.status == "success"
     assert captured["sample_id"] == "sample-a"
     assert captured["condition"] == "treated"
+    assert captured["group"] == "treatment"
+    assert captured["lane"] == "L002"
+    assert captured["replicate"] == 2
     assert captured["threads"] == 8
 
 
@@ -420,3 +532,116 @@ def test_report_exposes_rnaseq_outputs_and_metrics(tmp_path: Path) -> None:
     assert "Avg RNA-seq Mapping Rate" in html
     assert "80.00%" in html
     assert "Expressed Transcripts" in html
+
+
+def test_project_rnaseq_exports_matrices_design_and_missing_samples(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    planned_samples = [
+        {
+            "sample_id": "sample-a",
+            "workflow": "rnaseq",
+            "group": "control",
+            "condition": "untreated",
+            "lane": "L001",
+            "replicate": 1,
+        },
+        {
+            "sample_id": "sample-b",
+            "workflow": "rnaseq",
+            "group": "treatment",
+            "condition": "treated",
+            "lane": "L002",
+            "replicate": 1,
+        },
+        {"sample_id": "sample-failed", "workflow": "rnaseq"},
+        {"sample_id": "sample-missing", "workflow": "rnaseq"},
+        {"sample_id": "sample-not-run", "workflow": "rnaseq"},
+    ]
+
+    def successful_result(sample_id: str, rows: str) -> project_batch.ProjectJobResult:
+        run_dir = project_root / f"{sample_id}-rnaseq"
+        quant_path = run_dir / "results" / "salmon_quant" / "quant.sf"
+        quant_path.parent.mkdir(parents=True)
+        quant_path.write_text(
+            "Name\tLength\tEffectiveLength\tTPM\tNumReads\n" + rows,
+            encoding="utf-8",
+        )
+        (run_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "workflow": "rnaseq",
+                    "version": "1.0.1",
+                    "status": "success",
+                    "started_at": "2026-08-17T00:00:00Z",
+                    "parameters": {"sample_id": sample_id},
+                    "outputs": {"quant_sf": str(quant_path)},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return project_batch.ProjectJobResult(
+            sample_id=sample_id,
+            workflow="rnaseq",
+            run_dir=run_dir,
+            metadata_path=run_dir / "metadata.json",
+            status="success",
+            outputs={"quant_sf": str(quant_path)},
+        )
+
+    results = [
+        successful_result("sample-a", "tx2\t500\t400\t250000\t25\ntx1\t1000\t900\t750000\t75\n"),
+        successful_result("sample-b", "tx1\t1000\t900\t600000\t60\ntx3\t300\t200\t400000\t40\n"),
+        project_batch.ProjectJobResult(
+            sample_id="sample-failed",
+            workflow="rnaseq",
+            run_dir=project_root / "sample-failed-rnaseq",
+            metadata_path=project_root / "sample-failed-rnaseq" / "metadata.json",
+            status="failed",
+            outputs={},
+            error="salmon failed",
+        ),
+        project_batch.ProjectJobResult(
+            sample_id="sample-missing",
+            workflow="rnaseq",
+            run_dir=project_root / "sample-missing-rnaseq",
+            metadata_path=project_root / "sample-missing-rnaseq" / "metadata.json",
+            status="success",
+            outputs={},
+        ),
+    ]
+
+    exported = project_batch._write_rnaseq_project_exports(
+        project_root,
+        planned_samples=planned_samples,
+        results=results,
+    )
+
+    counts = Path(exported["counts_matrix"]).read_text(encoding="utf-8")
+    tpm = Path(exported["tpm_matrix"]).read_text(encoding="utf-8")
+    metadata = Path(exported["sample_metadata"]).read_text(encoding="utf-8")
+    assert counts.splitlines() == [
+        "transcript_id\tsample-a\tsample-b",
+        "tx1\t75\t60",
+        "tx2\t25\t0",
+        "tx3\t0\t40",
+    ]
+    assert "tx1\t750000\t600000" in tpm
+    assert "sample-a\tcontrol\tuntreated\tL001\t1\tsuccess" in metadata
+    assert "sample-failed" in exported["failed_samples"]
+    assert "sample-missing" in exported["missing_quant_samples"]
+    assert "sample-not-run" in exported["not_run_samples"]
+    assert exported["group_counts"] == {"control": 1, "treatment": 1}
+
+    (project_root / "project_summary.json").write_text(
+        json.dumps({"rnaseq": exported}),
+        encoding="utf-8",
+    )
+    report_path = project_root / "project_report.html"
+    report.generate_report(project_root, report_path)
+    html = report_path.read_text(encoding="utf-8")
+    assert "RNA-seq Project Summary" in html
+    assert "counts_matrix.tsv" in html
+    assert "sample_metadata.tsv" in html
+    assert "sample-failed" in html
+    assert "sample-not-run" in html

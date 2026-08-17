@@ -160,6 +160,8 @@ WORKFLOW_REGISTRY: dict[str, WorkflowManifest] = {
             FieldSpec("sample_id", "str"),
             FieldSpec("group", "str"),
             FieldSpec("condition", "str"),
+            FieldSpec("lane", "str"),
+            FieldSpec("replicate", "int", positive=True),
             FieldSpec("resume", "bool"),
         ),
         project_fields=_project_fields(
@@ -172,6 +174,8 @@ WORKFLOW_REGISTRY: dict[str, WorkflowManifest] = {
             FieldSpec("library_type", "str"),
             FieldSpec("group", "str"),
             FieldSpec("condition", "str"),
+            FieldSpec("lane", "str"),
+            FieldSpec("replicate", "int", positive=True),
             FieldSpec("resume", "bool"),
         ),
     ),

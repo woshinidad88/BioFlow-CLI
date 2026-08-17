@@ -930,6 +930,8 @@ def cmd_rnaseq(args: argparse.Namespace) -> int:
                 "sample_id": None,
                 "group": None,
                 "condition": None,
+                "lane": None,
+                "replicate": None,
                 "resume": False,
                 "profile": "local",
                 "memory": None,
@@ -996,6 +998,35 @@ def cmd_rnaseq(args: argparse.Namespace) -> int:
             console_err.print("Error: library-type must be non-empty", style="bold red")
         return EXIT_ARGUMENT_ERROR
 
+    replicate = int(params["replicate"]) if params["replicate"] is not None else None
+    if replicate is not None and replicate <= 0:
+        if args.json:
+            print(_json_error_payload("invalid_replicate", replicate=replicate))
+        else:
+            console_err.print("Error: replicate must be positive", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    group_value = str(params["group"]) if params["group"] is not None else None
+    condition_value = str(params["condition"]) if params["condition"] is not None else None
+    lane_value = str(params["lane"]) if params["lane"] is not None else None
+    if any(value is not None and not value.strip() for value in (group_value, condition_value, lane_value)):
+        message = "rnaseq design fields must be non-empty"
+        if args.json:
+            print(_json_error_payload("invalid_sample_design", message=message))
+        else:
+            console_err.print(f"Error: {message}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    has_group = group_value is not None
+    has_condition = condition_value is not None
+    if has_group != has_condition:
+        message = "rnaseq requires group and condition together"
+        if args.json:
+            print(_json_error_payload("invalid_sample_design", message=message))
+        else:
+            console_err.print(f"Error: {message}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
     outdir = Path(str(params["outdir"])) if params["outdir"] else None
     execution = build_execution_context(params, source="cli_or_config")
     try:
@@ -1009,8 +1040,10 @@ def cmd_rnaseq(args: argparse.Namespace) -> int:
             threads=threads,
             library_type=library_type,
             sample_id=str(params["sample_id"]) if params["sample_id"] else None,
-            group=str(params["group"]) if params["group"] else None,
-            condition=str(params["condition"]) if params["condition"] else None,
+            group=group_value,
+            condition=condition_value,
+            lane=lane_value,
+            replicate=replicate,
             resume=bool(params["resume"]),
             execution=execution,
             cli_mode=True,
@@ -1235,6 +1268,8 @@ def main() -> int:
     parser_rnaseq.add_argument("--sample-id", dest="sample_id", help="Optional sample identifier")
     parser_rnaseq.add_argument("--group", help="Optional experimental group")
     parser_rnaseq.add_argument("--condition", help="Optional experimental condition")
+    parser_rnaseq.add_argument("--lane", help="Optional sequencing lane identifier")
+    parser_rnaseq.add_argument("--replicate", type=int, help="Optional positive replicate number")
     parser_rnaseq.add_argument("--resume", action="store_true", help="Resume from the latest valid RNA-seq checkpoint")
     parser_rnaseq.add_argument("--profile", help="Execution profile (default: local)")
     parser_rnaseq.add_argument("--memory", help="Requested memory for execution metadata")

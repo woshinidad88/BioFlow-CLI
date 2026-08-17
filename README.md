@@ -37,7 +37,8 @@ License text: [MIT License](LICENSE)
 - **RNA-seq Quantification**:
   - FastQC + Salmon mapping-based transcript quantification
   - Single-end/paired-end reads, transcriptome index building, and prebuilt Salmon index reuse
-  - `quant.sf`, run summary JSON, mapping statistics, and sample design metadata
+  - `quant.sf`, run summary JSON, mapping statistics, and sample design metadata including lane/replicate
+  - Project-level counts/TPM matrices and a sample metadata table for downstream R/Python analysis
 - **Run Inspection**: `bioflow inspect` summarizes run status, critical outputs, failed steps, and log locations
 - **HTML Run Reports**: Export one or more workflow runs into a portable single-file HTML summary with success-rate cards, failure summaries, sample search/sort, workflow metrics, and structured JSON/TSV summaries
 - **Project Batch**: `bioflow project` executes mixed QC / alignment / search / RNA-seq samples from one YAML file and emits project summaries plus a combined HTML report
@@ -144,7 +145,7 @@ bioflow search --config examples/search.yml
 bioflow search --db ref.fa --query query.fa --profile local --backend container --container-image ghcr.io/biocael-dev/bioflow-cli:latest --threads 2 --memory 4G
 
 # Run paired-end RNA-seq and build a Salmon index from the transcriptome
-bioflow rnaseq --transcriptome transcripts.fa --input-r1 reads_1.fastq --input-r2 reads_2.fastq --outdir runs/rnaseq-001 --threads 8 --sample-id sample-a --group control --condition untreated
+bioflow rnaseq --transcriptome transcripts.fa --input-r1 reads_1.fastq --input-r2 reads_2.fastq --outdir runs/rnaseq-001 --threads 8 --sample-id sample-a --group control --condition untreated --lane L001 --replicate 1
 
 # Run single-end RNA-seq with an existing Salmon index
 bioflow rnaseq --index salmon-index --input reads.fastq --outdir runs/rnaseq-002 --library-type A
@@ -226,7 +227,9 @@ bioflow --json batch -i ./data -o ./formatted
 - parameter precedence is: explicit CLI argument > YAML config > built-in default
 - `qc`, `align`, and `rnaseq` support either `input` or the `input_r1` + `input_r2` pair
 - `rnaseq` requires exactly one Salmon reference source: `transcriptome` or `index`
-- RNA-seq design metadata accepts optional `sample_id`, `group`, and `condition`
+- RNA-seq design metadata accepts optional `sample_id`, `group`, `condition`, `lane`, and positive integer `replicate`
+- `group` and `condition` must be provided together when either is used
+- when a project uses RNA-seq group/condition design, every RNA-seq sample must provide both fields
 - `input` cannot be combined with `input_r1` / `input_r2`
 - workflow and project YAML files are validated against built-in workflow manifests before execution
 - manifest-based schema checks catch unknown fields, invalid types, non-positive numeric values, and workflow-specific missing fields early
@@ -244,12 +247,13 @@ bioflow --json batch -i ./data -o ./formatted
 - each run contains `logs/`, `results/`, `tmp/`, and `metadata.json`
 - `bioflow project` creates one project root with per-sample run directories such as `001-sample-qc-qc`
 - each project run also writes `project_summary.json`, `summary.json`, `summary.tsv`, and `project_report.html`
+- projects containing RNA-seq samples additionally write `counts_matrix.tsv` (Salmon `NumReads`), `tpm_matrix.tsv` (Salmon `TPM`), and `sample_metadata.tsv`; matrices include successful parseable Salmon runs while metadata retains failed, missing, and not-run samples
 - metadata now records `metadata_schema_version`, input file size / mtime / sha256, runtime environment, tool versions, and failure summary
 - metadata now also writes an `execution` block with `profile`, `backend`, `conda_env`, `container_image`, requested resources, and parameter source
 - each workflow step now records its backend, raw command, resolved command, and environment fingerprint
 - paired-end `qc` metadata also records `trimmed_r1`, `trimmed_r2`, `unpaired_r1`, and `unpaired_r2`
 - paired-end `align` metadata records `input_r1`, `input_r2`, `bam`, `bai`, and paired flagstat metrics
-- `rnaseq` metadata records sample design fields, FastQC/Salmon steps, `quant.sf`, Salmon meta information, mapping metrics, and transcript abundance summaries
+- `rnaseq` metadata records sample design fields (including lane/replicate), FastQC/Salmon steps, `quant.sf`, Salmon meta information, mapping metrics, and transcript abundance summaries
 - on failure, diagnostic stdout/stderr logs are retained under `logs/`
 
 ### Resume And Checkpoints
@@ -292,6 +296,7 @@ bioflow --json batch -i ./data -o ./formatted
 - alignment reports summarize BAM / BAI / flagstat outputs and key mapping metrics
 - search reports summarize TSV / summary outputs, hit count, and best hit
 - RNA-seq reports summarize `quant.sf`, Salmon metadata, mapping rate, mapped fragments, and expressed transcripts
+- project RNA-seq reports also show sample-design groups, counts/TPM matrix links, sample metadata, and failed or missing quantification warnings
 - TUI mode also exposes report export from the main menu
 
 ### Batch Concurrency
@@ -318,7 +323,7 @@ pip install -e .[dev]
 
 ## Project Status
 
-Current development version: **v1.0.0**
+Current development version: **v1.0.1**
 
 Release history and notes: [GitHub Releases](https://github.com/BioCael-Dev/BioFlow-CLI/releases)
 

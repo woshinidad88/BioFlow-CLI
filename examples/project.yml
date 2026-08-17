@@ -41,5 +41,18 @@ project:
       input_r2: rnaseq_2.fastq
       group: control
       condition: untreated
+      lane: L001
+      replicate: 1
+      library_type: A
+      threads: 8
+    - sample_id: sample-rnaseq-treated
+      workflow: rnaseq
+      index: salmon-transcriptome-index
+      input_r1: treated_1.fastq
+      input_r2: treated_2.fastq
+      group: treatment
+      condition: treated
+      lane: L002
+      replicate: 1
       library_type: A
       threads: 8
