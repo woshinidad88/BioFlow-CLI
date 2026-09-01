@@ -438,6 +438,25 @@ def _metric_payload(run: RunInfo) -> dict[str, Any]:
                 metrics[key] = run.stats[key]
             elif key in run.summary:
                 metrics[key] = run.summary[key]
+    elif run.workflow == "longread":
+        for key in (
+            "read_count",
+            "total_bases",
+            "mean_read_length",
+            "min_read_length",
+            "max_read_length",
+            "n50",
+            "avg_quality",
+            "q20_ratio",
+            "q30_ratio",
+            "mapped_reads",
+            "mapping_rate",
+            "supplementary_alignments",
+        ):
+            if key in run.stats:
+                metrics[key] = run.stats[key]
+            elif key in run.summary:
+                metrics[key] = run.summary[key]
 
     for key, value in run.stats.items():
         metrics.setdefault(key, value)
@@ -454,6 +473,7 @@ def _key_metric(run: RunInfo, metrics: dict[str, Any]) -> tuple[str, Any]:
         "align": ("mapping_rate", "mapped", "total"),
         "search": ("hit_count", "best_hit", "best_bitscore"),
         "rnaseq": ("mapping_rate", "mapped_fragments", "expressed_transcripts"),
+        "longread": ("n50", "mapping_rate", "read_count"),
     }
     for key in preferred_by_workflow.get(run.workflow, ()):
         if key in metrics:
@@ -607,6 +627,19 @@ def _core_outputs(run: RunInfo) -> dict[str, Any]:
                 core[key] = run.summary[key]
         return core
 
+    if run.workflow == "longread":
+        core = {
+            key: outputs[key]
+            for key in ("bam", "bai", "flagstat", "qc_summary", "summary")
+            if key in outputs
+        }
+        for key in ("read_count", "n50", "mean_read_length", "mapping_rate"):
+            if key in run.stats:
+                core[key] = run.stats[key]
+            elif key in run.summary:
+                core[key] = run.summary[key]
+        return core
+
     return outputs
 
 
@@ -669,6 +702,28 @@ def _workflow_metric_rows(workflow: str, runs: list[RunInfo]) -> dict[str, Any]:
             metrics[t("report_metric_rnaseq_mapped")] = sum(mapped)
         if expressed:
             metrics[t("report_metric_rnaseq_expressed")] = sum(expressed)
+    elif workflow == "longread":
+        read_counts = [
+            int(run.stats["read_count"])
+            for run in successful
+            if isinstance(run.stats.get("read_count"), int)
+        ]
+        n50_values = [
+            int(run.stats["n50"])
+            for run in successful
+            if isinstance(run.stats.get("n50"), int)
+        ]
+        rates = [
+            float(run.stats["mapping_rate"])
+            for run in successful
+            if isinstance(run.stats.get("mapping_rate"), (int, float))
+        ]
+        if read_counts:
+            metrics[t("report_metric_longread_reads")] = sum(read_counts)
+        if n50_values:
+            metrics[t("report_metric_longread_avg_n50")] = sum(n50_values) / len(n50_values)
+        if rates:
+            metrics[t("report_metric_longread_mapping_rate")] = sum(rates) / len(rates)
 
     return metrics
 

@@ -19,6 +19,7 @@ TOOL_REGISTRY: dict[str, tuple[str, str]] = {
     "makeblastdb": ("makeblastdb", "conda install -y -c bioconda blast"),
     "blastn": ("blastn", "conda install -y -c bioconda blast"),
     "salmon": ("salmon", "conda install -y -c bioconda salmon"),
+    "minimap2": ("minimap2", "conda install -y -c bioconda minimap2"),
 }
 
 

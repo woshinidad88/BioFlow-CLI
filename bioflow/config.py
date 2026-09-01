@@ -26,6 +26,8 @@ EXECUTION_OPTION_KEYS: tuple[str, ...] = (
     "profile", "threads", "memory", "queue", "time_limit", "backend", "conda_env", "container_image",
 )
 
+LONGREAD_PRESETS: set[str] = {"map-ont", "map-hifi", "map-pb"}
+
 
 class ConfigError(Exception):
     """配置文件加载或校验失败。"""
@@ -154,6 +156,25 @@ def _validate_rnaseq_design(data: dict[str, Any], *, context: str) -> None:
         raise ConfigError(f"{context} requires 'group' and 'condition' together")
 
 
+def _validate_longread_config(
+    data: dict[str, Any],
+    *,
+    context: str,
+    require_inputs: bool = False,
+) -> None:
+    """Validate long-read reference/input fields and minimap2 preset."""
+    if require_inputs:
+        for field in ("ref", "input"):
+            value = data.get(field)
+            if not isinstance(value, str) or not value.strip():
+                raise ConfigError(f"{context} requires non-empty {field}")
+    preset = data.get("preset")
+    if preset is not None and preset not in LONGREAD_PRESETS:
+        raise ConfigError(
+            f"{context} 'preset' must be one of: {', '.join(sorted(LONGREAD_PRESETS))}"
+        )
+
+
 def _read_yaml_mapping(config_path: Path) -> dict[str, Any]:
     """读取 YAML 并保证顶层是 mapping。"""
     if not config_path.exists():
@@ -178,7 +199,7 @@ def load_workflow_config(config_path: Path, workflow: str) -> dict[str, Any]:
 
     支持两种格式：
     1. 顶层直接为工作流参数映射
-    2. 顶层包含 `qc` / `align` / `search` 分组
+    2. 顶层包含对应 workflow 名称（如 `qc` / `align` / `longread`）分组
     """
     if workflow not in WORKFLOW_ALLOWED_KEYS:
         raise ConfigError(f"Unsupported workflow: {workflow}")
@@ -207,6 +228,8 @@ def load_workflow_config(config_path: Path, workflow: str) -> dict[str, Any]:
     if workflow == "rnaseq":
         _validate_rnaseq_reference(data, context="rnaseq config")
         _validate_rnaseq_design(data, context="rnaseq config")
+    if workflow == "longread":
+        _validate_longread_config(data, context="longread config")
     _validate_manifest_fields(data, workflow, context=f"{workflow} config")
     _validate_execution_options(data, context=f"{workflow} config")
 
@@ -285,6 +308,12 @@ def load_project_config(config_path: Path) -> dict[str, Any]:
                 require_reference=True,
             )
             _validate_rnaseq_design(item, context=f"Project sample '{sample_id}'")
+        if workflow == "longread":
+            _validate_longread_config(
+                item,
+                context=f"Project sample '{sample_id}'",
+                require_inputs=True,
+            )
         manifest = get_workflow_manifest(workflow)
         required_fields = tuple(
             key

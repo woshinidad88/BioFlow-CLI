@@ -17,6 +17,7 @@ from bioflow.bio_tasks import seq_menu
 from bioflow.env_manager import env_menu
 from bioflow.pipeline import qc_menu
 from bioflow.i18n import init_language, load_config, set_language, t
+from bioflow.longread import longread_menu
 from bioflow.report import report_menu
 from bioflow.rnaseq import rnaseq_menu
 from bioflow.search import search_menu
@@ -87,6 +88,7 @@ def main_menu() -> None:
             t("menu_seq"),
             t("menu_qc"),
             t("menu_align"),
+            t("menu_longread"),
             t("menu_search"),
             t("menu_rnaseq"),
             t("menu_report"),
@@ -117,6 +119,8 @@ def main_menu() -> None:
             qc_menu()
         elif answer == t("menu_align"):
             align_menu()
+        elif answer == t("menu_longread"):
+            longread_menu()
         elif answer == t("menu_search"):
             search_menu()
         elif answer == t("menu_rnaseq"):

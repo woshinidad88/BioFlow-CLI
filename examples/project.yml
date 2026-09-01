@@ -56,3 +56,10 @@ project:
       replicate: 1
       library_type: A
       threads: 8
+    - sample_id: sample-longread
+      workflow: longread
+      ref: ref.fa
+      input: nanopore_reads.fastq.gz
+      output: nanopore.sorted.bam
+      preset: map-ont
+      threads: 8

@@ -17,6 +17,7 @@ from bioflow import __version__
 from bioflow.alignment import run_alignment_pipeline
 from bioflow.config import merge_project_sample_defaults
 from bioflow.execution import build_execution_context
+from bioflow.longread import run_longread_pipeline
 from bioflow.pipeline import run_qc_pipeline
 from bioflow.preflight import PreflightError
 from bioflow.report import (
@@ -203,6 +204,27 @@ def _run_project_job(run_dir: Path, sample: dict[str, Any]) -> ProjectJobResult:
                     workflow,
                     run_dir,
                     str(metadata.get("failure_summary", "rnaseq failed")),
+                )
+        elif workflow == "longread":
+            result = run_longread_pipeline(
+                Path(sample["ref"]),
+                Path(sample["input"]),
+                output=Path(sample["output"]) if sample.get("output") else None,
+                outdir=run_dir,
+                preset=str(sample.get("preset", "map-ont")),
+                threads=int(sample.get("threads", 1)),
+                sample_id=sample_id,
+                resume=bool(sample.get("resume", False)),
+                execution=execution,
+                cli_mode=True,
+            )
+            if result is None:
+                metadata = _read_run_metadata(run_dir)
+                return _job_failure(
+                    sample_id,
+                    workflow,
+                    run_dir,
+                    str(metadata.get("failure_summary", "longread failed")),
                 )
         else:  # pragma: no cover
             return _job_failure(sample_id, workflow, run_dir, f"unsupported workflow: {workflow}")

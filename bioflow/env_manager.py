@@ -30,6 +30,7 @@ BIO_TOOLS: list[tuple[str, str, list[str]]] = [
     ("BLAST+", "blastn", ["conda", "install", "-y", "-c", "bioconda", "blast"]),
     ("Trimmomatic", "trimmomatic", ["conda", "install", "-y", "-c", "bioconda", "trimmomatic"]),
     ("Salmon", "salmon", ["conda", "install", "-y", "-c", "bioconda", "salmon"]),
+    ("minimap2", "minimap2", ["conda", "install", "-y", "-c", "bioconda", "minimap2"]),
 ]
 
 

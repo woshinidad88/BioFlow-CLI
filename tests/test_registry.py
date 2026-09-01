@@ -8,18 +8,21 @@ def test_builtin_workflow_manifests_cover_existing_workflows() -> None:
     manifests = list_workflow_manifests()
     workflow_ids = [manifest.workflow_id for manifest in manifests]
 
-    assert workflow_ids == ["align", "qc", "rnaseq", "search"]
+    assert workflow_ids == ["align", "longread", "qc", "rnaseq", "search"]
     assert get_workflow_manifest("qc").display_name == "Quality Control"
     assert "paired-end" in get_workflow_manifest("align").supported_inputs
     assert "hpc-slurm" in get_workflow_manifest("search").supported_profiles
     assert "summary" in get_workflow_manifest("search").key_outputs
     assert "quant_sf" in get_workflow_manifest("rnaseq").key_outputs
+    assert "long-read-fastq" in get_workflow_manifest("longread").supported_inputs
+    assert "qc_summary" in get_workflow_manifest("longread").key_outputs
 
 
 def test_manifest_exposes_config_schema_fields() -> None:
     align = get_workflow_manifest("align")
     search = get_workflow_manifest("search")
     rnaseq = get_workflow_manifest("rnaseq")
+    longread = get_workflow_manifest("longread")
 
     assert "input_r1" in align.allowed_keys
     assert align.project_fields["ref"].required_for_project is True
@@ -27,11 +30,14 @@ def test_manifest_exposes_config_schema_fields() -> None:
     assert search.fields["max_target_seqs"].positive is True
     assert rnaseq.fields["library_type"].kind == "str"
     assert "condition" in rnaseq.project_allowed_keys
+    assert longread.project_fields["ref"].required_for_project is True
+    assert longread.project_fields["input"].required_for_project is True
+    assert longread.fields["threads"].positive is True
 
 
 def test_checked_in_examples_match_manifest_schemas() -> None:
     examples_dir = Path(__file__).parents[1] / "examples"
-    for workflow in ("qc", "align", "search", "rnaseq"):
+    for workflow in ("qc", "align", "search", "rnaseq", "longread"):
         config = load_workflow_config(examples_dir / f"{workflow}.yml", workflow)
         assert config
 
@@ -42,4 +48,5 @@ def test_checked_in_examples_match_manifest_schemas() -> None:
         "search",
         "rnaseq",
         "rnaseq",
+        "longread",
     ]

@@ -25,6 +25,7 @@ from bioflow.alignment import run_alignment_pipeline
 from bioflow.config import ConfigError, load_project_config, load_workflow_config
 from bioflow.i18n import init_language, t
 from bioflow.inspect import inspect_run, render_inspection_text
+from bioflow.longread import LONGREAD_PRESETS, run_longread_pipeline
 from bioflow.pipeline import run_qc_pipeline
 from bioflow.preflight import PreflightError
 from bioflow.project_batch import run_project_batch
@@ -1082,6 +1083,126 @@ def cmd_rnaseq(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
 
 
+def cmd_longread(args: argparse.Namespace) -> int:
+    """Handle long-read QC and minimap2 alignment."""
+    try:
+        params = _merge_workflow_args(
+            args,
+            "longread",
+            {
+                "ref": None,
+                "input": None,
+                "output": None,
+                "outdir": None,
+                "preset": "map-ont",
+                "threads": 1,
+                "sample_id": None,
+                "resume": False,
+                "profile": "local",
+                "memory": None,
+                "queue": None,
+                "time_limit": None,
+                "backend": "system",
+                "conda_env": None,
+                "container_image": None,
+            },
+        )
+    except ConfigError as exc:
+        if args.json:
+            print(json.dumps({"error": "config_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(f"Error: {exc}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    missing = next((field for field in ("ref", "input") if not params[field]), None)
+    if missing is not None:
+        if args.json:
+            print(_json_error_payload("missing_required", field=missing))
+        else:
+            console_err.print(f"Error: {missing} is required (CLI or config)", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    ref = Path(str(params["ref"]))
+    reads = Path(str(params["input"]))
+    for candidate in (ref, reads):
+        if not candidate.is_file():
+            if args.json:
+                print(json.dumps({"error": "file_not_found", "path": str(candidate)}, ensure_ascii=False))
+            else:
+                console_err.print(t("seq_file_not_found", path=str(candidate)), style="bold red")
+            return EXIT_ARGUMENT_ERROR
+
+    preset = str(params["preset"])
+    threads = int(params["threads"])
+    sample_id = str(params["sample_id"]) if params["sample_id"] is not None else None
+    if preset not in LONGREAD_PRESETS:
+        message = f"preset must be one of: {', '.join(LONGREAD_PRESETS)}"
+        if args.json:
+            print(_json_error_payload("invalid_preset", preset=preset, message=message))
+        else:
+            console_err.print(f"Error: {message}", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+    if threads <= 0:
+        if args.json:
+            print(_json_error_payload("invalid_threads", threads=threads))
+        else:
+            console_err.print(f"Error: threads must be positive (got {threads})", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+    if sample_id is not None and not sample_id.strip():
+        if args.json:
+            print(_json_error_payload("invalid_sample_id"))
+        else:
+            console_err.print("Error: sample-id must be non-empty", style="bold red")
+        return EXIT_ARGUMENT_ERROR
+
+    output = Path(str(params["output"])) if params["output"] else None
+    outdir = Path(str(params["outdir"])) if params["outdir"] else None
+    execution = build_execution_context(params, source="cli_or_config")
+    try:
+        result = run_longread_pipeline(
+            ref,
+            reads,
+            output=output,
+            outdir=outdir,
+            preset=preset,
+            threads=threads,
+            sample_id=sample_id,
+            resume=bool(params["resume"]),
+            execution=execution,
+            cli_mode=True,
+        )
+        if result is None:
+            metadata_path = (outdir or _default_workflow_outdir("longread", reads)) / "metadata.json"
+            _print_failure_diagnostics(metadata_path, as_json=args.json)
+            return EXIT_RUNTIME_ERROR
+        if args.json:
+            print(json.dumps({"status": "success", "execution": execution, **result}, ensure_ascii=False))
+        return EXIT_SUCCESS
+    except PreflightError as exc:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "error": "dependency_missing",
+                        "tools": exc.missing_tools,
+                        "backend": exc.backend,
+                        "reason": exc.reason,
+                        "missing_runtime": exc.missing_runtime,
+                        "conda_env": exc.conda_env,
+                        "container_image": exc.container_image,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        return EXIT_DEPENDENCY_MISSING
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"error": "runtime_error", "message": str(exc)}, ensure_ascii=False))
+        else:
+            console_err.print(t("error_unexpected", err=str(exc)), style="bold red")
+        return EXIT_RUNTIME_ERROR
+
+
 def cmd_project(args: argparse.Namespace) -> int:
     """处理 project 子命令：项目级多样本 workflow batch。"""
     config_path = _resolve_config_path(getattr(args, "config", None))
@@ -1279,6 +1400,48 @@ def main() -> int:
     parser_rnaseq.add_argument("--conda-env", dest="conda_env", help="Conda environment name")
     parser_rnaseq.add_argument("--container-image", dest="container_image", help="Container image name")
 
+    # longread subcommand
+    parser_longread = subparsers.add_parser(
+        "longread",
+        help="Run long-read QC and alignment (minimap2 + SAMtools)",
+    )
+    parser_longread.add_argument("--config", help="YAML config file for longread workflow")
+    parser_longread.add_argument("--ref", "-r", help="Reference genome FASTA file")
+    parser_longread.add_argument("--input", "-i", help="Input long-read FASTA/FASTQ file")
+    parser_longread.add_argument(
+        "--output",
+        "-o",
+        help="Output BAM file written under results/ unless absolute path is given",
+    )
+    parser_longread.add_argument(
+        "--outdir",
+        help="Run output root directory (default: input_dir/longread_run)",
+    )
+    parser_longread.add_argument(
+        "--preset",
+        choices=list(LONGREAD_PRESETS),
+        help="minimap2 preset: map-ont, map-hifi, or map-pb (default: map-ont)",
+    )
+    parser_longread.add_argument("--threads", "-t", type=int, help="Number of threads (default: 1)")
+    parser_longread.add_argument("--sample-id", dest="sample_id", help="Optional sample identifier")
+    parser_longread.add_argument(
+        "--resume",
+        action="store_true",
+        default=None,
+        help="Resume from valid long-read checkpoints",
+    )
+    parser_longread.add_argument("--profile", help="Execution profile (default: local)")
+    parser_longread.add_argument("--memory", help="Requested memory for execution metadata")
+    parser_longread.add_argument("--queue", help="Requested queue/partition for execution metadata")
+    parser_longread.add_argument("--time-limit", dest="time_limit", help="Requested walltime for execution metadata")
+    parser_longread.add_argument(
+        "--backend",
+        choices=["system", "conda", "container"],
+        help="Execution backend (default: system)",
+    )
+    parser_longread.add_argument("--conda-env", dest="conda_env", help="Conda environment name")
+    parser_longread.add_argument("--container-image", dest="container_image", help="Container image name")
+
     # report 子命令
     parser_report = subparsers.add_parser("report", help="Generate HTML run report")
     parser_report.add_argument("--input", "-i", required=True, help="Run directory or parent directory containing runs")
@@ -1332,6 +1495,8 @@ def main() -> int:
         return cmd_search(args)
     elif args.command == "rnaseq":
         return cmd_rnaseq(args)
+    elif args.command == "longread":
+        return cmd_longread(args)
     elif args.command == "report":
         return cmd_report(args)
     elif args.command == "project":

@@ -1,0 +1,14 @@
+longread:
+  ref: ref.fa
+  input: nanopore_reads.fastq.gz
+  outdir: runs/longread-001
+  output: nanopore.sorted.bam
+  sample_id: sample-longread
+  preset: map-ont
+  profile: workstation
+  backend: conda
+  conda_env: bioflow-env
+  threads: 8
+  memory: 16G
+  queue: short
+  time_limit: "04:00:00"
